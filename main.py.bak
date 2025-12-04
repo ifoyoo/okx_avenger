@@ -1,0 +1,387 @@
+"""OKX 主入口：运行完整交易引擎."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import schedule
+from loguru import logger
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.table import Table
+from rich import box
+
+from config import RuntimeSettings
+
+from core.client import OKXClient
+from core.analysis import LLMService
+from core.engine import TradingEngine
+from core.execution import ExecutionPlan, ExecutionReport
+from core.models import TradeSignal
+from config.settings import get_settings
+from core.strategy import Strategy
+from core.watchlist_loader import WatchlistManager
+
+ACTION_EMOJI = {
+    "buy": "🟢",
+    "sell": "🔴",
+    "hold": "⚪",
+}
+ERROR_HINTS = {
+    "51008": "保证金不足，请补充 USDT 或降低仓位。",
+    "51004": "当前持仓方向受限，检查账户持仓模式。",
+    "58150": "触发风控限制，稍后重试或联系 OKX 支持。",
+}
+
+RUN_INTERVAL_MINUTES = 5
+DEFAULT_MAX_POSITION = 0.002
+DRY_RUN = False
+FEATURE_LIMIT = 150
+LOG_DIR: Optional[Path] = None
+
+
+def render_section(console: Console, title: str, style: str = "dim") -> None:
+    console.rule(f"{title}", style=style)
+
+
+def _confirm_launch(console: Console) -> None:
+    console.print(
+        "[bold red]######################################################[/bold red]\n"
+        "[bold green] 欢迎使用 -> okx Fucker [/bold green]\n"
+        "[bold green] 当前版本 :  v2025.11.24 '邹拜' [/bold green]\n"
+        "[bold green] 友情提示 :  一入币圈深似海，从此节操是路人。[/bold green]\n"
+        "[bold green] 正在启动 -> OKX 交易引擎...随时按 Ctrl+C 退出。 [/bold green]\n"
+        "[bold red]######################################################[/bold red]\n"
+    )
+    time.sleep(3)
+
+
+def _configure_runtime(runtime_settings: RuntimeSettings) -> None:
+    global RUN_INTERVAL_MINUTES, DEFAULT_MAX_POSITION, FEATURE_LIMIT, LOG_DIR
+    RUN_INTERVAL_MINUTES = runtime_settings.run_interval_minutes
+    DEFAULT_MAX_POSITION = runtime_settings.default_max_position
+    FEATURE_LIMIT = runtime_settings.feature_limit
+    LOG_DIR = Path(runtime_settings.log_dir)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        LOG_DIR / "runtime-{time}.log",
+        rotation="1 day",
+        retention="7 days",
+        enqueue=True,
+        level="INFO",
+    )
+
+
+def process_instrument(
+    engine: TradingEngine,
+    console: Console,
+    item: Dict[str, Any],
+    account_snapshot: Optional[Dict[str, float]] = None,
+) -> None:
+    inst_id = item["inst_id"]
+    timeframe = item.get("timeframe", "5m")
+    max_position = float(item.get("max_position", DEFAULT_MAX_POSITION))
+    higher_timeframes: Tuple[str, ...] = tuple(item.get("higher_timeframes", ()))
+    render_section(console, f"{inst_id} · {timeframe}", style="bold green")
+    protection_overrides = item.get("protection")
+    if protection_overrides is not None and not isinstance(protection_overrides, dict):
+        protection_overrides = None
+    try:
+        result = engine.run_once(
+            inst_id=inst_id,
+            timeframe=timeframe,
+            limit=FEATURE_LIMIT,
+            dry_run=DRY_RUN,
+            max_position=max_position,
+            higher_timeframes=higher_timeframes,
+            account_snapshot=account_snapshot,
+            protection_overrides=protection_overrides,
+        )
+    except Exception as exc:  # pragma: no cover
+        console.print(f"[red]执行 {inst_id} 失败: {exc}[/red]")
+        return
+
+    summary_text = result.get("analysis_summary")
+    history_hint = result.get("history_hint")
+    if summary_text:
+        render_section(console, "行情摘要", style="bold cyan")
+        console.print(summary_text)
+    if history_hint:
+        render_section(console, "历史表现", style="bold cyan")
+        console.print(history_hint)
+    render_section(console, "LLM 分析", style="bold magenta")
+    console.print(Markdown(result["analysis"]))
+    render_section(console, "策略信号", style="bold yellow")
+    display_signal_summary(inst_id, timeframe, result["signal"], console)
+    display_signal(result["signal"], console)
+    render_section(console, "信号解析")
+    console.print(Markdown(result["signal"].reason))
+    execution_payload = result.get("execution") or {}
+    execution_plan: Optional[ExecutionPlan] = execution_payload.get("plan")
+    execution_report: Optional[ExecutionReport] = execution_payload.get("report")
+    if execution_plan:
+        render_section(console, "执行计划")
+        display_execution_plan(execution_plan, console)
+    if result["order"]:
+        render_section(console, "下单结果")
+        display_order_result(result["order"], result["signal"], console)
+    elif execution_report and not execution_report.success:
+        render_section(console, "执行反馈", style="bold red")
+        display_execution_feedback(execution_report, console)
+    elif execution_plan and execution_plan.blocked:
+        console.print(
+            f"[yellow]⚠️ 执行被阻断：{execution_plan.block_reason or '原因未知'}[/yellow]"
+        )
+    else:
+        console.print("[yellow]⚠️ 当前信号未触发下单。[/yellow]")
+
+
+def display_signal(signal: TradeSignal, console: Console) -> None:
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_row("操作", signal.action.value.upper())
+    table.add_row("置信度", f"{signal.confidence:.2f}")
+    table.add_row("数量", f"{signal.size}")
+    protection = signal.protection
+    if protection and protection.take_profit:
+        table.add_row(
+            "止盈",
+            f"{protection.take_profit.trigger_px:.6f} ({protection.take_profit.trigger_type})",
+        )
+    if protection and protection.stop_loss:
+        table.add_row(
+            "止损",
+            f"{protection.stop_loss.trigger_px:.6f} ({protection.stop_loss.trigger_type})",
+        )
+    console.print(table)
+
+
+def display_execution_plan(plan: ExecutionPlan, console: Console) -> None:
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_row("模式", plan.order_type.upper())
+    table.add_row("数量", f"{plan.size:.6f}")
+    table.add_row("交易模式", plan.td_mode or "-")
+    table.add_row("持仓方向", plan.pos_side or "-")
+    table.add_row("预计滑点", f"{plan.est_slippage:.2%}")
+    if plan.price:
+        table.add_row("目标价格", f"{plan.price:.6f}")
+    status = "阻断" if plan.blocked else "可执行"
+    if plan.block_reason:
+        status = f"{status} - {plan.block_reason}"
+    table.add_row("状态", status)
+    if plan.notes:
+        table.add_row("提示", " / ".join(plan.notes))
+    if plan.protection:
+        if plan.protection.take_profit:
+            table.add_row(
+                "止盈",
+                f"{plan.protection.take_profit.trigger_px:.6f} ({plan.protection.take_profit.trigger_type})",
+            )
+        if plan.protection.stop_loss:
+            table.add_row(
+                "止损",
+                f"{plan.protection.stop_loss.trigger_px:.6f} ({plan.protection.stop_loss.trigger_type})",
+            )
+    console.print(table)
+
+
+def display_execution_feedback(report: ExecutionReport, console: Console) -> None:
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    title = "执行成功" if report.success else "执行失败"
+    table.add_row("状态", title)
+    table.add_row("单据类型", report.plan.order_type.upper())
+    if report.code:
+        table.add_row("错误码", str(report.code))
+    if report.error:
+        table.add_row("信息", report.error)
+    else:
+        table.add_row("信息", "下单完成，等待成交回执。")
+    console.print(table)
+
+
+def display_signal_summary(
+    inst_id: str, timeframe: str, signal: TradeSignal, console: Console
+) -> None:
+    action_key = signal.action.value.lower()
+    emoji = ACTION_EMOJI.get(action_key, "ℹ️")
+    size_text = f"{signal.size:.6f}"
+    if signal.size <= 0:
+        size_text = "0 (资金受限)"
+    console.print(
+        f"{emoji} {signal.action.value.upper()} @ {timeframe} size={size_text} conf={signal.confidence:.2f}"
+    )
+
+
+def display_balance(balance: Dict[str, List[Dict[str, str]]], console: Console) -> None:
+    data = balance.get("data", [])
+    if not data:
+        console.print("[yellow]账户余额信息为空[/yellow]")
+        return
+    entry = data[0]
+    total_eq = float(entry.get("totalEq", 0) or 0)
+    cash_avail = float(entry.get("cashBal", 0) or 0)
+    details = entry.get("details", [])
+    if details:
+        try:
+            cash_avail = sum(float(item.get("availBal", 0) or 0) for item in details)
+        except Exception:
+            cash_avail = float(entry.get("cashBal", 0) or 0)
+    ratio = (cash_avail / total_eq) if total_eq else 0.0
+    ratio_pct = f"{ratio * 100:.1f}%"
+    render_section(console, "balance", f"账户总权益: {total_eq:.2f} USD")
+    console.print(f"可用资金 {cash_avail:.2f} USD ({ratio_pct})")
+    if not details:
+        return
+    table = Table(show_header=True, header_style="bold", box=box.SIMPLE)
+    table.add_column("币种", justify="left")
+    table.add_column("可用", justify="right")
+    table.add_column("权益", justify="right")
+    for item in details:
+        ccy = item.get("ccy", "-")
+        avail = item.get("availBal", "-")
+        eq = item.get("eq", "-")
+        table.add_row(str(ccy), str(avail), str(eq))
+    console.print(table)
+
+
+def display_order_result(
+    order_resp: Dict[str, Any], signal: TradeSignal, console: Console
+) -> None:
+    if order_resp.get("error"):
+        _display_order_error(order_resp["error"], console)
+        return
+    data = order_resp.get("data") or []
+    entry = data[0] if data else {}
+    code = str(order_resp.get("code", ""))
+    s_code = str(entry.get("sCode", ""))
+    status_ok = code in ("0", "200") and s_code == "0"
+    status = "成功" if status_ok else "失败"
+    ts_text = entry.get("ts") or order_resp.get("outTime") or order_resp.get("inTime")
+    ts_formatted = _format_timestamp(ts_text)
+    if not status_ok:
+        _display_order_error(
+            {
+                "code": code,
+                "message": order_resp.get("msg"),
+                "data": data,
+            },
+            console,
+        )
+        return
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_row("状态", status)
+    table.add_row("订单ID", entry.get("ordId", "-"))
+    if entry.get("clOrdId"):
+        table.add_row("客户端ID", entry.get("clOrdId"))
+    table.add_row("时间", ts_formatted)
+    side = entry.get("side") or signal.action.value
+    pos_side = entry.get("posSide")
+    direction = side.upper()
+    if pos_side:
+        direction = f"{direction} ({pos_side})"
+    table.add_row("方向", direction)
+    size_txt = entry.get("sz") or entry.get("fillSz") or f"{signal.size:.6f}"
+    table.add_row("数量", str(size_txt))
+    table.add_row("策略置信度", f"{signal.confidence:.2f}")
+    reason_summary = signal.reason.split("\n", 1)[0] if signal.reason else "-"
+    if len(reason_summary) > 120:
+        reason_summary = reason_summary[:117] + "..."
+    table.add_row("信号摘要", reason_summary)
+    avg_px = entry.get("avgPx") or entry.get("fillPx") or "-"
+    table.add_row("均价", str(avg_px))
+    fee = entry.get("fee") or entry.get("fillFee") or entry.get("execFee") or "-"
+    table.add_row("手续费", str(fee))
+    message = entry.get("sMsg") or order_resp.get("msg") or "-"
+    table.add_row("信息", str(message))
+    console.print(table)
+
+
+def _format_timestamp(ts: Any) -> str:
+    if not ts:
+        return "-"
+    try:
+        ts_int = int(ts)
+        while ts_int > 1_000_000_000_000:
+            ts_int //= 1000
+        dt = datetime.fromtimestamp(ts_int, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception:
+        return str(ts)
+
+
+def _display_order_error(error_info: Dict[str, Any], console: Console) -> None:
+    code = str(error_info.get("code") or "")
+    msg = error_info.get("message") or error_info.get("msg") or "未知错误"
+    data = error_info.get("data") or []
+    detail_code = ""
+    detail_msg = ""
+    if isinstance(data, list) and data:
+        detail_code = str(data[0].get("sCode") or "")
+        detail_msg = data[0].get("sMsg") or ""
+    hint = ERROR_HINTS.get(detail_code or code, "请检查参数和资金设置后重试。")
+    table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_row("状态", "下单失败")
+    if code:
+        table.add_row("错误码", code)
+    if detail_code:
+        table.add_row("子错误码", detail_code)
+    table.add_row("信息", detail_msg or msg)
+    table.add_row("建议", hint)
+    console.print(table)
+
+
+def run_watchlist(
+    engine: TradingEngine,
+    console: Console,
+    watchlist_manager: WatchlistManager,
+) -> None:
+    account_snapshot: Optional[Dict[str, float]] = None
+    try:
+        balance = engine.okx.get_account_balance()
+        display_balance(balance, console)
+        account_snapshot = engine.build_account_snapshot(balance)
+    except Exception as exc:  # pragma: no cover
+        console.print(f"[red]查询余额失败: {exc}[/red]")
+    refreshed = watchlist_manager.get_watchlist(account_snapshot)
+    if not refreshed:
+        console.print("[yellow]当前 watchlist 为空，跳过本轮。[/yellow]")
+        return
+    for item in refreshed:
+        process_instrument(
+            engine,
+            console,
+            item,
+            account_snapshot=account_snapshot,
+        )
+
+
+def main() -> None:
+    console = Console()
+    try:
+        _confirm_launch(console)
+        settings = get_settings()
+        _configure_runtime(settings.runtime)
+        okx = OKXClient(settings)
+        llm = LLMService(settings)
+        strategy = Strategy()
+        engine = TradingEngine(okx, llm, strategy, settings)
+        watchlist_manager = WatchlistManager(okx, settings)
+
+        run_watchlist(engine, console, watchlist_manager)
+        schedule.every(RUN_INTERVAL_MINUTES).minutes.do(
+            run_watchlist,
+            engine=engine,
+            console=console,
+            watchlist_manager=watchlist_manager,
+        )
+
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.print("收到退出信号，停止运行。")
+
+
+if __name__ == "__main__":
+    main()

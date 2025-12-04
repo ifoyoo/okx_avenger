@@ -1,0 +1,27 @@
+# 核心依赖：程序直接导入的库
+loguru==0.7.3
+okx==2.1.2
+openai==2.8.0
+pandas==2.3.3
+python-dotenv==1.2.1
+pydantic==2.12.4
+pydantic-settings==2.11.0
+rich==14.2.0
+schedule==1.2.2
+ta==0.11.0
+vectorbt==0.26.1
+quantstats==0.0.62
+websocket-client==1.8.0
+
+# 关键传递依赖，保证版本一致性
+certifi==2025.11.12
+charset-normalizer==3.4.4
+numpy==1.23.5
+packaging==25.0
+requests==2.32.5
+six==1.17.0
+python-dateutil==2.9.0.post0
+pytz==2025.2
+typing_extensions==4.15.0
+idna==3.11
+urllib3==1.26.12

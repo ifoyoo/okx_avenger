@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+logs/
+*.log
+data/auto_watchlist.json
+llm-cache.json
+llm-decisions.jsonl
+.okx-cache/

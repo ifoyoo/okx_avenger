@@ -1,0 +1,32 @@
+[
+	{
+		"_comment": "1",
+		"inst_id": "2Z-USDT-SWAP",
+		"timeframe": "5m",
+		"higher_timeframes": ["15m", "1H"]
+	},
+	{
+		"_comment": "2",
+		"inst_id": "ALLO-USDT-SWAP",
+		"timeframe": "5m",
+		"higher_timeframes": ["15m", "1H"]
+	},
+	{
+		"_comment": "3",
+		"inst_id": "OL-USDT-SWAP",
+		"timeframe": "5m",
+		"higher_timeframes": ["15m", "1H"]
+	},
+	{
+		"_comment": "4",
+		"inst_id": "JELLYJELLY-USDT-SWAP",
+		"timeframe": "5m",
+		"higher_timeframes": ["15m", "1H"]
+	},
+	{
+		"_comment": "5",
+		"inst_id": "PUMP-USDT-SWAP",
+		"timeframe": "5m",
+		"higher_timeframes": ["15m", "1H"]
+	}
+]
