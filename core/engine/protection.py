@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from loguru import logger
 
@@ -37,6 +37,7 @@ class ProtectionMonitor:
         self._cooldown: Dict[str, float] = {}
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._positions_cache: Dict[str, Dict[str, str]] = {}
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -62,8 +63,19 @@ class ProtectionMonitor:
             logger.warning(f"查询持仓失败，无法执行保护：{exc}")
             return
         data = resp.get("data") or []
+        snapshot: Dict[str, Dict[str, str]] = {}
         for entry in data:
+            inst = str(entry.get("instId") or "").upper()
+            if inst:
+                snapshot.setdefault(inst, {})[entry.get("posSide") or str(entry.get("pos") or 0)] = entry
             self._evaluate_position(entry)
+        self._positions_cache = snapshot
+
+    def latest_positions(self) -> Dict[str, List[Dict[str, str]]]:
+        structured: Dict[str, List[Dict[str, str]]] = {}
+        for inst, entries in self._positions_cache.items():
+            structured[inst] = list(entries.values())
+        return structured
 
     def _evaluate_position(self, entry: Dict[str, str]) -> None:
         try:

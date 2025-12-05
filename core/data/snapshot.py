@@ -6,6 +6,7 @@ import atexit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+import time
 
 import pandas as pd
 
@@ -65,6 +66,9 @@ class MarketSnapshotCollector:
         self.stream = stream
         self._executor = ThreadPoolExecutor(max_workers=SNAPSHOT_EXECUTOR_WORKERS, thread_name_prefix="snapshot")
         atexit.register(self._executor.shutdown, wait=False)
+        self._ticker_cache: Dict[str, Tuple[float, TickerStats]] = {}
+        self._deriv_cache: Dict[str, Tuple[float, DerivativeStats]] = {}
+        self._cache_ttl = 120.0
 
     def build(self, inst_id: str) -> MarketSnapshot:
         tasks = {
@@ -176,6 +180,10 @@ class MarketSnapshotCollector:
             return None
 
     def _collect_derivatives(self, inst_id: str) -> Optional[DerivativeStats]:
+        cached = self._deriv_cache.get(inst_id)
+        now = time.time()
+        if cached and now - cached[0] < self._cache_ttl:
+            return cached[1]
         funding_rate = None
         funding_time = None
         open_interest = None
@@ -198,9 +206,15 @@ class MarketSnapshotCollector:
             pass
         if funding_rate is None and open_interest is None:
             return None
-        return DerivativeStats(funding_rate=funding_rate, funding_time=funding_time, open_interest=open_interest)
+        stats = DerivativeStats(funding_rate=funding_rate, funding_time=funding_time, open_interest=open_interest)
+        self._deriv_cache[inst_id] = (now, stats)
+        return stats
 
     def _collect_ticker(self, inst_id: str) -> Optional[TickerStats]:
+        now = time.time()
+        cached = self._ticker_cache.get(inst_id)
+        if cached and now - cached[0] < self._cache_ttl:
+            return cached[1]
         try:
             resp = self.client.get_ticker(inst_id)
         except Exception:
@@ -235,7 +249,7 @@ class MarketSnapshotCollector:
         range_pct = None
         if high_24h and low_24h and low_24h > 0:
             range_pct = (high_24h - low_24h) / low_24h
-        return TickerStats(
+        stats = TickerStats(
             last=last,
             open_24h=open_24h,
             high_24h=high_24h,
@@ -247,6 +261,8 @@ class MarketSnapshotCollector:
             change_pct=change_pct,
             range_pct=range_pct,
         )
+        self._ticker_cache[inst_id] = (now, stats)
+        return stats
 
 
 def _format_pct(value: float) -> str:

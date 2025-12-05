@@ -826,16 +826,19 @@ def run_watchlist(
         daily_stats = performance_tracker.get_snapshot_for_days(1)
         display_balance(balance, console, perf_stats)
         account_snapshot = engine.build_account_snapshot(balance)
-        try:
-            positions_resp = engine.okx.get_positions(inst_type="SWAP")
-            entries = positions_resp.get("data") or []
-            for entry in entries:
-                inst = str(entry.get("instId") or "").upper()
-                if not inst:
-                    continue
-                positions_map.setdefault(inst, []).append(entry)
-        except Exception as exc:  # pragma: no cover
-            logger.warning(f"查询持仓列表失败: {exc}")
+        if protection_monitor and hasattr(protection_monitor, "latest_positions"):
+            positions_map = protection_monitor.latest_positions()
+        else:
+            try:
+                positions_resp = engine.okx.get_positions(inst_type="SWAP")
+                entries = positions_resp.get("data") or []
+                for entry in entries:
+                    inst = str(entry.get("instId") or "").upper()
+                    if not inst:
+                        continue
+                    positions_map.setdefault(inst, []).append(entry)
+            except Exception as exc:  # pragma: no cover
+                logger.warning(f"查询持仓列表失败: {exc}")
     except Exception as exc:  # pragma: no cover
         print_centered(console, f"[red]查询余额失败: {exc}[/red]")
     refreshed = watchlist_manager.get_watchlist(account_snapshot)
