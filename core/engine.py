@@ -74,6 +74,9 @@ class TradingEngine:
         higher_timeframes: Optional[Tuple[str, ...]] = ("15m", "1H"),
         account_snapshot: Optional[Dict[str, float]] = None,
         protection_overrides: Optional[Dict[str, Any]] = None,
+        positions_snapshot: Optional[List[Dict[str, Any]]] = None,
+        perf_stats: Optional[Dict[str, Any]] = None,
+        daily_stats: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """执行一次完整流程."""
 
@@ -86,12 +89,18 @@ class TradingEngine:
         )
         snapshot = self.snapshot_collector.build(inst_id)
         account_snapshot = account_snapshot or self._fetch_account_snapshot()
+        risk_note = self._build_risk_note(account_snapshot)
         analysis_result = self.deepseek.analyze(
             inst_id,
             timeframe,
             features,
             higher_features,
             snapshot=snapshot,
+            account_snapshot=account_snapshot,
+            risk_note=risk_note,
+            position_entries=positions_snapshot,
+            perf_stats=perf_stats,
+            daily_stats=daily_stats,
         )
         analysis = analysis_result.text
         account_state = self._to_account_state(account_snapshot)
@@ -102,7 +111,7 @@ class TradingEngine:
             dry_run=dry_run,
             max_position=max_position,
             leverage=self.leverage,
-            risk_note=self._build_risk_note(account_snapshot),
+            risk_note=risk_note,
             higher_timeframes=tuple(higher_timeframes or ()),
             account_equity=account_snapshot.get("equity"),
             available_balance=account_snapshot.get("available"),

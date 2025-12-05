@@ -417,6 +417,7 @@ def process_instrument(
     daily_stats: Optional[Dict[str, Any]] = None,
     notifier: Optional[Notifier] = None,
     notify_level: str = "critical",
+    positions_map: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> None:
     inst_id = item["inst_id"]
     timeframe = item.get("timeframe", "5m")
@@ -436,6 +437,9 @@ def process_instrument(
             higher_timeframes=higher_timeframes,
             account_snapshot=account_snapshot,
             protection_overrides=protection_overrides,
+            positions_snapshot=(positions_map.get(inst_id.upper()) if positions_map else None),
+            perf_stats=perf_stats,
+            daily_stats=daily_stats,
         )
     except Exception as exc:  # pragma: no cover
         console.print(f"[red]执行 {inst_id} 失败: {exc}[/red]")
@@ -574,6 +578,7 @@ def _render_instrument_block(
     console_width: int,
     color_system: Optional[str],
     no_color: bool,
+    positions_map: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> Tuple[int, str]:
     temp_console = Console(
         width=console_width,
@@ -590,6 +595,7 @@ def _render_instrument_block(
         daily_stats=daily_stats,
         notifier=notifier,
         notify_level=notify_level,
+        positions_map=positions_map,
     )
     text = temp_console.export_text(styles=True)
     return index, text
@@ -835,12 +841,23 @@ def run_watchlist(
     account_snapshot: Optional[Dict[str, float]] = None
     perf_stats: Optional[Dict[str, Any]] = None
     daily_stats: Optional[Dict[str, Any]] = None
+    positions_map: Dict[str, List[Dict[str, Any]]] = {}
     try:
         balance = engine.okx.get_account_balance()
         perf_stats = performance_tracker.get_snapshot()
         daily_stats = performance_tracker.get_snapshot_for_days(1)
         display_balance(balance, console, perf_stats)
         account_snapshot = engine.build_account_snapshot(balance)
+        try:
+            positions_resp = engine.okx.get_positions(inst_type="SWAP")
+            entries = positions_resp.get("data") or []
+            for entry in entries:
+                inst = str(entry.get("instId") or "").upper()
+                if not inst:
+                    continue
+                positions_map.setdefault(inst, []).append(entry)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"查询持仓列表失败: {exc}")
     except Exception as exc:  # pragma: no cover
         print_centered(console, f"[red]查询余额失败: {exc}[/red]")
     refreshed = watchlist_manager.get_watchlist(account_snapshot)
@@ -875,6 +892,7 @@ def run_watchlist(
                 console_width,
                 color_system,
                 no_color,
+                positions_map,
             )
         )
     for future in as_completed(futures):

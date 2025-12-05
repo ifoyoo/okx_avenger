@@ -39,6 +39,9 @@ class _LLMRequestPayload:
     performance_hint: str
     snapshot_text: str
     summary_text: str
+    account_context: str
+    position_context: str
+    pnl_context: str
 
 
 _PERF_CACHE_MAXLEN = 64
@@ -106,14 +109,14 @@ class LLMService:
         self._cache_flush_interval = 15.0
         atexit.register(self._flush_cache_on_exit)
         self._analysis_guidance = (
-            "分析要点：\n"
-            "1. 均线（5/10/20）排列与价格位置\n"
-            "2. 趋势、波动与关键支撑/阻力\n"
-            "3. 日内超涨/超跌与反转机会\n"
-            "4. K线与动量变化，关注反转信号\n"
-            "5. 订单流趋势、买卖力量、资金流向\n"
-            "6. 风险回报≥1:1.5，单笔亏损≤权益1%\n"
-            "7. 环境不明确时倾向观望保护资金\n"
+            "策略守则：\n"
+            "1. 先依据 5m/15m/1H 趋势与均线结构判断方向，仅在多周期共振时考虑顺势建仓。\n"
+            "2. 结合 RSI/ATR 判断动量与波动，明确是趋势延续还是反转博弈，量化触发位置（支撑/阻力/区间百分位）。\n"
+            "3. 必须引用盘口/成交/资金费率等数据验证买卖力量和流动性，若数据缺失或矛盾要主动说明并降低信心。\n"
+            "4. 建仓前给出大致的入场逻辑与触发条件，并确保风险回报≥1:1.5（默认 TP 10% / SL 5% 可微调但要说明理由）。\n"
+            "5. 若多空信号冲突、成交量低或波动不足，优先输出 hold，并解释缺乏优势的具体原因。\n"
+            "6. 风险描述需落地到具体指标（资金费率、盘口失衡、关键价位被破等），invalid_conditions 要可执行。\n"
+            "7. confidence>0.65 仅在逻辑、数据、风险三者一致时给出；否则控制在 0.5 附近以防误导。\n"
         )
         self._batch_worker = _LLMBatchWorker(self)
 
@@ -124,6 +127,11 @@ class LLMService:
         features: pd.DataFrame,
         higher_features: Optional[Dict[str, pd.DataFrame]] = None,
         snapshot: Optional[MarketSnapshot] = None,
+        account_snapshot: Optional[Dict[str, float]] = None,
+        risk_note: Optional[str] = None,
+        position_entries: Optional[List[Dict[str, Any]]] = None,
+        perf_stats: Optional[Dict[str, Any]] = None,
+        daily_stats: Optional[Dict[str, Any]] = None,
     ) -> LLMAnalysis:
         """调用 LLM 输出分析文本."""
 
@@ -135,12 +143,18 @@ class LLMService:
             return cached[1]
         summary_text = build_market_summary(latest, higher_features, snapshot)
         performance_hint = build_performance_hint(inst_id, timeframe)
+        account_context = self._build_account_context(account_snapshot, risk_note)
+        position_context = self._build_position_context(inst_id, position_entries)
+        pnl_context = self._build_pnl_context(perf_stats, daily_stats)
         payload = self._build_request_payload(
             inst_id=inst_id,
             timeframe=timeframe,
             summary_text=summary_text,
             performance_hint=performance_hint,
             snapshot=snapshot,
+            account_context=account_context,
+            position_context=position_context,
+            pnl_context=pnl_context,
         )
         if self._batch_worker:
             result = self._batch_worker.submit(payload)
@@ -226,6 +240,9 @@ class LLMService:
         summary_text: str,
         performance_hint: str,
         snapshot: Optional[MarketSnapshot],
+        account_context: str,
+        position_context: str,
+        pnl_context: str,
     ) -> _LLMRequestPayload:
         snapshot_text = _format_snapshot(snapshot)
         request_id = f"{inst_id}-{timeframe}-{int(time.time() * 1_000_000) % 1_000_000}"
@@ -236,7 +253,121 @@ class LLMService:
             performance_hint=performance_hint,
             snapshot_text=snapshot_text,
             summary_text=summary_text,
+            account_context=account_context,
+            position_context=position_context,
+            pnl_context=pnl_context,
         )
+
+    def _build_account_context(
+        self,
+        account_snapshot: Optional[Dict[str, float]],
+        risk_note: Optional[str],
+    ) -> str:
+        parts: List[str] = []
+        equity = None
+        available = None
+        if account_snapshot is not None:
+            raw_equity = account_snapshot.get("equity")
+            raw_available = account_snapshot.get("available")
+            try:
+                equity = float(raw_equity) if raw_equity is not None else None
+            except (TypeError, ValueError):
+                equity = None
+            try:
+                available = float(raw_available) if raw_available is not None else None
+            except (TypeError, ValueError):
+                available = None
+        if equity is not None and equity > 0:
+            ratio = (available or 0.0) / equity if available is not None else None
+            if available is not None:
+                parts.append(f"权益 {equity:.2f} USD，可用 {available:.2f} USD ({(ratio or 0.0) * 100:.0f}%)")
+            else:
+                parts.append(f"权益 {equity:.2f} USD，可用资金未知")
+        elif available is not None:
+            parts.append(f"可用资金 {available:.2f} USD，权益未知")
+        else:
+            parts.append("账户资金数据不可用")
+        strategy = getattr(self.settings, "strategy", None)
+        if strategy:
+            usage = getattr(strategy, "balance_usage_ratio", None)
+            leverage = getattr(strategy, "default_leverage", None)
+            tp = getattr(strategy, "default_take_profit_pct", None)
+            sl = getattr(strategy, "default_stop_loss_pct", None)
+            details: List[str] = []
+            if usage:
+                details.append(f"单轮使用 {usage * 100:.0f}% 资金")
+            if leverage:
+                details.append(f"策略杠杆 {leverage:.2f}x")
+            if tp and sl:
+                details.append(f"默认 TP {tp:.2%} / SL {sl:.2%}")
+            elif tp:
+                details.append(f"默认 TP {tp:.2%}")
+            elif sl:
+                details.append(f"默认 SL {sl:.2%}")
+            if details:
+                parts.append("；".join(details))
+        if risk_note:
+            parts.append(risk_note)
+        return "资金与风控：" + "；".join(parts)
+
+    def _build_position_context(
+        self,
+        inst_id: str,
+        position_entries: Optional[List[Dict[str, Any]]],
+    ) -> str:
+        if not position_entries:
+            return f"持仓：{inst_id} 当前无持仓。"
+        fragments: List[str] = []
+        for entry in position_entries:
+            try:
+                raw_size = float(entry.get("pos") or 0.0)
+            except (TypeError, ValueError):
+                raw_size = 0.0
+            if abs(raw_size) <= 0:
+                continue
+            pos_side = entry.get("posSide") or ("long" if raw_size > 0 else "short")
+            avg_px = entry.get("avgPx") or entry.get("avgPxUsd") or "-"
+            mark_px = entry.get("markPx") or entry.get("last") or "-"
+            upl = entry.get("upl") or entry.get("uplVal") or "0"
+            upl_ratio = entry.get("uplRatio") or entry.get("uplRatioP") or "0"
+            try:
+                upl_ratio_val = float(upl_ratio)
+                if abs(upl_ratio_val) > 5:
+                    upl_ratio_val /= 100
+                upl_ratio_text = f"{upl_ratio_val:.2%}"
+            except (TypeError, ValueError):
+                upl_ratio_text = str(upl_ratio)
+            margin_mode = entry.get("mgnMode") or entry.get("marginMode") or "-"
+            lever = entry.get("lever") or entry.get("leverType") or "-"
+            fragments.append(
+                f"{pos_side} {raw_size} 张，均价 {avg_px}，标记 {mark_px}，浮盈 {upl} ({upl_ratio_text})，杠杆 {lever}，保证金 {margin_mode}"
+            )
+        if not fragments:
+            return f"持仓：{inst_id} 当前无持仓。"
+        return f"持仓：{inst_id} " + "；".join(fragments)
+
+    @staticmethod
+    def _build_pnl_context(
+        perf_stats: Optional[Dict[str, Any]],
+        daily_stats: Optional[Dict[str, Any]],
+    ) -> str:
+        parts: List[str] = []
+        if perf_stats:
+            lookback = int(perf_stats.get("lookback_days", 0) or 0)
+            pnl = perf_stats.get("total_pnl", 0.0) or 0.0
+            win_rate = (perf_stats.get("win_rate") or 0.0) * 100
+            sample = int(perf_stats.get("sample_count", 0) or 0)
+            parts.append(
+                f"近{lookback}日 P/L {pnl:+.2f} USDT，胜率 {win_rate:.0f}% ，样本 {sample}"
+            )
+        if daily_stats:
+            day_pnl = daily_stats.get("total_pnl", 0.0) or 0.0
+            day_win = (daily_stats.get("win_rate") or 0.0) * 100
+            day_sample = int(daily_stats.get("sample_count", 0) or 0)
+            parts.append(f"当日 P/L {day_pnl:+.2f} USDT，胜率 {day_win:.0f}% ，样本 {day_sample}")
+        if not parts:
+            return "近期 P/L：暂无可用统计。"
+        return "近期 P/L：" + "；".join(parts)
 
     def _call_single(self, payload: _LLMRequestPayload) -> LLMAnalysis:
         user_prompt = self._compose_single_prompt(payload)
@@ -377,6 +508,9 @@ class LLMService:
             f"交易对: {payload.inst_id}\n"
             f"周期: {payload.timeframe}\n"
             f"{payload.performance_hint}\n"
+            f"{payload.account_context}\n"
+            f"{payload.position_context}\n"
+            f"{payload.pnl_context}\n"
             f"市场快照：\n{payload.snapshot_text}\n"
             "以下为系统生成的多尺度行情摘要：\n"
             f"{payload.summary_text}\n"
@@ -395,6 +529,9 @@ class LLMService:
                 f"交易对: {payload.inst_id}\n"
                 f"周期: {payload.timeframe}\n"
                 f"{payload.performance_hint}\n"
+                f"{payload.account_context}\n"
+                f"{payload.position_context}\n"
+                f"{payload.pnl_context}\n"
                 f"市场快照：\n{payload.snapshot_text}\n"
                 f"行情摘要：\n{payload.summary_text}\n"
             )
