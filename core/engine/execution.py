@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
-from .client import OKXClient
-from .models import ProtectionTarget, SignalAction, TradeProtection, TradeSignal
+from core.client import OKXClient
+from core.models import ProtectionTarget, SignalAction, TradeProtection, TradeSignal
 
 MAX_SLIPPAGE_PCT = 0.02
 LIMIT_OFFSET_RATIO = 0.001

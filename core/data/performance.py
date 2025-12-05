@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from .client import OKXClient
+from core.client import OKXClient
 
 
 class PerformanceTracker:

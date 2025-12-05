@@ -9,7 +9,7 @@ from typing import Dict, Optional, List
 
 from loguru import logger
 
-from .client import OKXClient
+from core.client import OKXClient
 
 
 @dataclass

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from loguru import logger
 
 from config.settings import RuntimeSettings, StrategySettings
-from .client import OKXClient
+from core.client import OKXClient
 
 
 Number = Optional[float]

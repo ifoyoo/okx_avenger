@@ -21,7 +21,7 @@ from loguru import logger
 
 from config.settings import AppSettings
 
-from .data_pipeline import build_market_summary, MarketSnapshot
+from core.data.snapshot import MarketSnapshot, build_market_summary
 
 
 @dataclass

@@ -21,18 +21,17 @@ from rich import box
 
 from config import RuntimeSettings
 
-from core.client import OKXClient
-from core.analysis import LLMService
-from core.engine import TradingEngine
-from core.execution import ExecutionPlan, ExecutionReport
+from core.client import MarketDataStream, OKXClient
+from core.strategy.llm import LLMService
+from core.engine.trading import TradingEngine
+from core.engine.execution import ExecutionPlan, ExecutionReport
 from core.models import ProtectionTarget, TradeSignal
 from config.settings import get_settings
-from core.strategy import Strategy
-from core.performance import PerformanceTracker
-from core.market_stream import MarketDataStream
-from core.notifications import build_notifier, Notifier
-from core.protection_monitor import ProtectionMonitor, ProtectionThresholds
-from core.watchlist_loader import WatchlistManager, load_watchlist
+from core.strategy.core import Strategy
+from core.data.performance import PerformanceTracker
+from core.utils.notifications import Notifier, build_notifier
+from core.engine.protection import ProtectionMonitor, ProtectionThresholds
+from core.data.watchlist_loader import WatchlistManager, load_watchlist
 
 ACTION_EMOJI = {
     "buy": "🟢",

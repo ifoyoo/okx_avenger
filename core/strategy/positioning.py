@@ -7,7 +7,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .models import SignalAction, StrategyContext
+from core.models import SignalAction, StrategyContext
 
 
 VOL_TARGET = 0.015

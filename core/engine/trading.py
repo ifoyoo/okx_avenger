@@ -11,21 +11,20 @@ import pandas as pd
 
 from loguru import logger
 
-from .client import OKXClient
-from .data_utils import candles_to_dataframe
-from .analysis import LLMService, DecisionLogger, DecisionRecord
-from .execution import ExecutionEngine, ExecutionReport
-from .data_pipeline import MarketSnapshotCollector
-from .models import (
+from core.client import MarketDataStream, OKXClient
+from core.data.features import candles_to_dataframe
+from core.strategy.llm import LLMService, DecisionLogger, DecisionRecord
+from core.engine.execution import ExecutionEngine, ExecutionReport
+from core.data.snapshot import MarketSnapshotCollector
+from core.models import (
     SignalAction,
     StrategyContext,
     TradeSignal,
 )
-from .risk import AccountState, RiskManager
+from core.engine.risk import AccountState, RiskManager
 from config.settings import AppSettings
-from .strategy import Strategy, StrategyOutput
-from .protection import build_protection_settings
-from .market_stream import MarketDataStream
+from core.strategy.core import Strategy, StrategyOutput
+from core.protection import build_protection_settings
 
 class TradingEngine:
     """单次运行或循环运行的交易引擎."""

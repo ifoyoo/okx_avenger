@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import pandas as pd
 from loguru import logger
 
-from .models import (
+from core.models import (
     ProtectionRule,
     ProtectionTarget,
     TradeProtection,

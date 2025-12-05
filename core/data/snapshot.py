@@ -10,8 +10,7 @@ import time
 
 import pandas as pd
 
-from .client import OKXClient
-from .market_stream import MarketDataStream
+from core.client import MarketDataStream, OKXClient
 
 SNAPSHOT_EXECUTOR_WORKERS = 12
 

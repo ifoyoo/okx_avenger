@@ -10,7 +10,7 @@ from loguru import logger
 
 from config.settings import AppSettings
 from .auto_watchlist import AutoWatchlistBuilder
-from .client import OKXClient
+from core.client import OKXClient
 
 DEFAULT_CONFIG_PATH = Path("watchlist.json")
 DEFAULT_TIMEFRAME = "5m"

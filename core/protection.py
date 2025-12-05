@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .models import ProtectionRule, ProtectionSettings
+from core.models import ProtectionRule, ProtectionSettings
 
 
 def build_protection_settings(overrides: Optional[Dict[str, Any]] = None) -> ProtectionSettings:
