@@ -14,15 +14,14 @@ from loguru import logger
 from .client import OKXClient
 from .data_utils import candles_to_dataframe
 from .analysis import LLMService, DecisionLogger, DecisionRecord
-from .execution import ExecutionEngine, ExecutionPlan, ExecutionReport
+from .execution import ExecutionEngine, ExecutionReport
 from .data_pipeline import MarketSnapshotCollector
 from .models import (
     SignalAction,
     StrategyContext,
-    TradeProtection,
     TradeSignal,
 )
-from .risk import AccountState, RiskAssessment, RiskManager
+from .risk import AccountState, RiskManager
 from config.settings import AppSettings
 from .strategy import Strategy, StrategyOutput
 from .protection import build_protection_settings
@@ -63,6 +62,7 @@ class TradingEngine:
         self._candle_cache_lock = Lock()
         self._candle_cache_ttl = 30  # seconds
         self._max_candle_cache = 64
+        self._higher_tf_cache_ttl = 180.0  # seconds
 
     def run_once(
         self,
@@ -177,27 +177,40 @@ class TradingEngine:
             "order": order_result,
         }
 
-    def _fetch_features(self, inst_id: str, timeframe: str, limit: int):
+    def _fetch_features(
+        self,
+        inst_id: str,
+        timeframe: str,
+        limit: int,
+        cache_ttl: Optional[float] = None,
+    ) -> pd.DataFrame:
+        ttl = cache_ttl if cache_ttl is not None else self._timeframe_cache_ttl(timeframe)
+        key = (inst_id, timeframe, limit)
+        cached = self._get_cached_candles(key, ttl)
+        if cached is not None:
+            return cached
+        stream_df: Optional[pd.DataFrame] = None
         if self.market_stream:
             streamed = self.market_stream.get_candle_data(inst_id, timeframe, limit)
             if streamed:
-                df = candles_to_dataframe(streamed)
-                if len(df) >= min(limit // 2, 20):
-                    return df
-        key = (inst_id, timeframe, limit)
-        now = time.time()
-        with self._candle_cache_lock:
-            cached = self._candle_cache.get(key)
-            if cached and now - cached[0] < self._candle_cache_ttl:
-                return cached[1].copy(deep=True)
+                df = candles_to_dataframe(streamed).tail(limit)
+                if len(df) >= limit:
+                    self._store_cached_candles(key, df)
+                    return df.copy(deep=True)
+                stream_df = df
         resp = self.okx.get_candles(inst_id=inst_id, bar=timeframe, limit=limit)
-        df = candles_to_dataframe(resp["data"])
-        with self._candle_cache_lock:
-            self._candle_cache[key] = (now, df)
-            if len(self._candle_cache) > self._max_candle_cache:
-                oldest_key = next(iter(self._candle_cache))
-                self._candle_cache.pop(oldest_key, None)
-        return df.copy(deep=True)
+        rest_df = candles_to_dataframe(resp["data"]).tail(limit)
+        if stream_df is not None and not stream_df.empty:
+            combined = (
+                pd.concat([rest_df, stream_df])
+                .drop_duplicates(subset="ts", keep="last")
+                .sort_values("ts")
+                .tail(limit)
+            )
+        else:
+            combined = rest_df
+        self._store_cached_candles(key, combined)
+        return combined.copy(deep=True)
 
     def _fetch_multi_timeframes(
         self,
@@ -224,14 +237,25 @@ class TradingEngine:
         if len(valid_timeframes) == 1:
             tf_key = valid_timeframes[0]
             try:
-                data[tf_key] = self._fetch_features(inst_id, tf_key, limit // 2 or 50)
+                data[tf_key] = self._fetch_features(
+                    inst_id,
+                    tf_key,
+                    limit // 2 or 50,
+                    cache_ttl=self._timeframe_cache_ttl(tf_key),
+                )
             except Exception as exc:  # pragma: no cover
                 logger.warning(f"获取 {inst_id} {tf_key} K线失败: {exc}")
             return data
         max_workers = min(4, len(valid_timeframes))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(self._fetch_features, inst_id, tf_key, limit // 2 or 50): tf_key
+                executor.submit(
+                    self._fetch_features,
+                    inst_id,
+                    tf_key,
+                    limit // 2 or 50,
+                    self._timeframe_cache_ttl(tf_key),
+                ): tf_key
                 for tf_key in valid_timeframes
             }
             for future in as_completed(futures):
@@ -379,6 +403,37 @@ class TradingEngine:
                 if isinstance(value, dict):
                     merged[key] = dict(value)
         return merged
+
+    def _get_cached_candles(
+        self, key: Tuple[str, str, int], ttl: float
+    ) -> Optional[pd.DataFrame]:
+        now = time.time()
+        with self._candle_cache_lock:
+            cached = self._candle_cache.get(key)
+            if cached and now - cached[0] < ttl:
+                return cached[1].copy(deep=True)
+        return None
+
+    def _store_cached_candles(self, key: Tuple[str, str, int], df: pd.DataFrame) -> None:
+        now = time.time()
+        with self._candle_cache_lock:
+            self._candle_cache[key] = (now, df)
+            if len(self._candle_cache) > self._max_candle_cache:
+                oldest_key = next(iter(self._candle_cache))
+                self._candle_cache.pop(oldest_key, None)
+
+    def _timeframe_cache_ttl(self, timeframe: str) -> float:
+        tf = (timeframe or "").lower()
+        try:
+            if tf.endswith("m"):
+                minutes = int(tf[:-1] or 0)
+                if minutes >= 15:
+                    return self._higher_tf_cache_ttl
+            elif tf.endswith("h") or tf.endswith("d") or tf.endswith("w"):
+                return self._higher_tf_cache_ttl
+        except ValueError:
+            pass
+        return self._candle_cache_ttl
 
     @staticmethod
     def _sanitize_positive_value(value: Any) -> float:

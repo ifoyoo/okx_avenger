@@ -18,7 +18,7 @@ from .models import (
     StrategyContext,
     TradeSignal,
 )
-from .positioning import PositionSizer, VOL_TARGET
+from .positioning import PositionSizer, VOL_TARGET, GLOBAL_POSITION_CAP
 
 
 ACTION_KEYWORDS = {
@@ -180,6 +180,12 @@ class ObjectiveSignalGenerator:
         higher_action, higher_conf, higher_note = self._higher_timeframe_bias(higher_features)
         if higher_note:
             signals.append(ObjectiveSignal("higher_timeframe", higher_action, higher_conf, higher_note))
+        volume_signal = self._volume_pressure_signal(features)
+        if volume_signal:
+            signals.append(volume_signal)
+        vola_signal = self._volatility_breakout_signal(features)
+        if vola_signal:
+            signals.append(vola_signal)
         return tuple(signals)
 
     def volatility_regime(
@@ -321,6 +327,63 @@ class ObjectiveSignalGenerator:
             note = "高波动，指标置信度降低"
         return SignalAction.HOLD, 0.4, note
 
+    def _volume_pressure_signal(self, features: pd.DataFrame) -> Optional[ObjectiveSignal]:
+        if len(features) < 20:
+            return None
+        window = min(len(features), 40)
+        recent = features.tail(window)
+        avg_vol = float(recent["volume"].iloc[:-1].mean() or 0.0)
+        latest_vol = float(recent["volume"].iloc[-1] or 0.0)
+        if avg_vol <= 0 or latest_vol <= 0:
+            return None
+        ratio = latest_vol / avg_vol
+        obv_series = recent.get("obv")
+        mfi_series = recent.get("mfi")
+        if obv_series is None or mfi_series is None:
+            return None
+        start_idx = max(len(recent) - 6, 0)
+        obv_delta = float(obv_series.iloc[-1] - obv_series.iloc[start_idx])
+        price_delta = float(recent["close"].iloc[-1] - recent["close"].iloc[start_idx])
+        mfi = float(mfi_series.iloc[-1])
+        note = f"成交量 {ratio:.1f}x, OBV Δ{obv_delta:.0f}, MFI {mfi:.1f}"
+        if ratio >= 1.8 and obv_delta > 0 and price_delta > 0 and mfi >= 45:
+            conf = min(0.85, 0.55 + (ratio - 1.8) * 0.15)
+            return ObjectiveSignal("volume_pressure", SignalAction.BUY, conf, note)
+        if ratio >= 1.8 and obv_delta < 0 and price_delta < 0 and mfi <= 55:
+            conf = min(0.85, 0.55 + (ratio - 1.8) * 0.15)
+            return ObjectiveSignal("volume_pressure", SignalAction.SELL, conf, note)
+        if ratio < 0.8 and abs(price_delta) < 0.002:
+            return ObjectiveSignal("volume_pressure", SignalAction.HOLD, 0.3, note)
+        return None
+
+    def _volatility_breakout_signal(self, features: pd.DataFrame) -> Optional[ObjectiveSignal]:
+        if len(features) < 50:
+            return None
+        widths = features["bb_width"].tail(60)
+        if widths.empty:
+            return None
+        current_width = float(widths.iloc[-1] or 0.0)
+        prev_mean = float(widths.iloc[:-1].mean() or 0.0)
+        if prev_mean <= 0:
+            return None
+        squeeze = current_width < prev_mean * 0.7
+        expansion = current_width > prev_mean * 1.2 and widths.iloc[-3] < prev_mean * 0.8
+        high_roll = features["high"].rolling(20).max()
+        low_roll = features["low"].rolling(20).min()
+        if len(high_roll) < 21 or len(low_roll) < 21:
+            return None
+        prev_high = float(high_roll.iloc[-2])
+        prev_low = float(low_roll.iloc[-2])
+        close = float(features["close"].iloc[-1])
+        note = f"宽度 {current_width:.4f} (均值 {prev_mean:.4f})"
+        if expansion and close > prev_high:
+            return ObjectiveSignal("volatility_breakout", SignalAction.BUY, 0.6, note + " 向上突破")
+        if expansion and close < prev_low:
+            return ObjectiveSignal("volatility_breakout", SignalAction.SELL, 0.6, note + " 向下突破")
+        if squeeze:
+            return ObjectiveSignal("volatility_breakout", SignalAction.HOLD, 0.35, note + " 压缩等待")
+        return None
+
     @staticmethod
     def _higher_timeframe_bias(
         features_map: Optional[Dict[str, pd.DataFrame]]
@@ -406,6 +469,8 @@ class ObjectiveSignalGenerator:
 class SignalFusionEngine:
     """融合客观指标与 LLM 观点."""
 
+    SUPPORTIVE_NAMES = {"volume_pressure", "volatility_breakout"}
+
     def fuse(self, objective_signals: Sequence[ObjectiveSignal], llm_view: LLMView) -> FusionResult:
         indicator = self._get_signal(objective_signals, "indicator")
         higher_tf = self._get_signal(objective_signals, "higher_timeframe")
@@ -418,6 +483,18 @@ class SignalFusionEngine:
             else:
                 base_conf = max(0.2, base_conf - 0.2 * max(0.5, higher_tf.confidence))
             notes.append(f"多周期：{higher_tf.note}")
+        for support in objective_signals:
+            if support.name not in self.SUPPORTIVE_NAMES or support.action == SignalAction.HOLD:
+                continue
+            label = "成交量" if support.name == "volume_pressure" else "波动" if support.name == "volatility_breakout" else support.name
+            if base_action == SignalAction.HOLD:
+                base_action = support.action
+                base_conf = support.confidence
+            elif support.action == base_action:
+                base_conf = min(1.0, base_conf + 0.1 * max(0.3, support.confidence))
+            else:
+                base_conf = max(0.2, base_conf - 0.1 * max(0.3, support.confidence))
+            notes.append(f"{label}：{support.note}")
         action, confidence = self._combine_actions(base_action, base_conf, llm_view.action, llm_view.confidence)
         return FusionResult(action=action, confidence=confidence, notes=tuple(note for note in notes if note))
 
@@ -564,6 +641,15 @@ class Strategy:
         higher = next((sig for sig in objective_signals if sig.name == "higher_timeframe"), None)
         if higher and higher.note:
             sections.append(f"多周期：{higher.note} (置信 {higher.confidence:.2f})")
+        for sig in objective_signals:
+            if sig.name in {"indicator", "higher_timeframe"}:
+                continue
+            label_map = {
+                "volume_pressure": "成交量",
+                "volatility_breakout": "波动",
+            }
+            label = label_map.get(sig.name, sig.name)
+            sections.append(f"{label}：{sig.action.value.upper()} (置信 {sig.confidence:.2f}) - {sig.note}")
         reason_text = llm_view.reason or analysis_text.strip()
         sections.append(
             f"LLM观点：{llm_view.action.value.upper()} (置信 {llm_view.confidence:.2f}) - {reason_text}"

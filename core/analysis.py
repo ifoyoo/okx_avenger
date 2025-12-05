@@ -42,6 +42,7 @@ class _LLMRequestPayload:
     account_context: str
     position_context: str
     pnl_context: str
+    base_strategy_hint: str
 
 
 _PERF_CACHE_MAXLEN = 64
@@ -90,7 +91,12 @@ def _register_performance_record(record: Dict[str, Any]) -> None:
 class LLMService:
     """为策略提供自然语言分析."""
 
-    def __init__(self, settings: AppSettings) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        batch_max: Optional[int] = None,
+        batch_wait: Optional[float] = None,
+    ) -> None:
         self.settings = settings
         self.ai = settings.ai
         try:
@@ -118,7 +124,15 @@ class LLMService:
             "6. 风险描述需落地到具体指标（资金费率、盘口失衡、关键价位被破等），invalid_conditions 要可执行。\n"
             "7. confidence>0.65 仅在逻辑、数据、风险三者一致时给出；否则控制在 0.5 附近以防误导。\n"
         )
-        self._batch_worker = _LLMBatchWorker(self)
+        self._system_base = (
+            "你是负责数字资产量化交易分析的顾问，需输出明确且审慎的操作建议。"
+            "必须返回可解析的 JSON，字段 action 仅能是 buy/sell/hold，confidence 为 0~1 数值，"
+            "其余字段为简短中文字符串。数据不足或信号矛盾时默认给出 hold，并在 risk 中说明不确定性。"
+            "避免夸张或绝对化措辞，不要输出 Markdown、额外文字或代码块。"
+        )
+        self._batch_max = batch_max or 4
+        self._batch_wait = batch_wait or 0.15
+        self._batch_worker = _LLMBatchWorker(self, max_batch=self._batch_max, wait_seconds=self._batch_wait)
 
     def analyze(
         self,
@@ -155,6 +169,7 @@ class LLMService:
             account_context=account_context,
             position_context=position_context,
             pnl_context=pnl_context,
+            base_strategy_hint="基础策略：当前仅依赖系统指标与 LLM。"
         )
         if self._batch_worker:
             result = self._batch_worker.submit(payload)
@@ -243,6 +258,7 @@ class LLMService:
         account_context: str,
         position_context: str,
         pnl_context: str,
+        base_strategy_hint: str,
     ) -> _LLMRequestPayload:
         snapshot_text = _format_snapshot(snapshot)
         request_id = f"{inst_id}-{timeframe}-{int(time.time() * 1_000_000) % 1_000_000}"
@@ -256,6 +272,7 @@ class LLMService:
             account_context=account_context,
             position_context=position_context,
             pnl_context=pnl_context,
+            base_strategy_hint=base_strategy_hint,
         )
 
     def _build_account_context(
@@ -309,6 +326,13 @@ class LLMService:
         if risk_note:
             parts.append(risk_note)
         return "资金与风控：" + "；".join(parts)
+
+    def _build_system_prompt(self, account_context: str, pnl_context: str) -> str:
+        return (
+            f"{self._system_base}\n"
+            f"{account_context}\n"
+            f"{pnl_context}\n"
+        )
 
     def _build_position_context(
         self,
@@ -371,17 +395,13 @@ class LLMService:
 
     def _call_single(self, payload: _LLMRequestPayload) -> LLMAnalysis:
         user_prompt = self._compose_single_prompt(payload)
+        system_prompt = self._build_system_prompt(payload.account_context, payload.pnl_context)
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "你是负责数字资产量化交易分析的顾问，需输出明确且审慎的操作建议。"
-                        "必须返回可解析的 JSON，字段 action 仅能是 buy/sell/hold，confidence 为 0~1 数值，"
-                        "其余字段为简短中文字符串。数据不足或信号矛盾时默认给出 hold，并在 risk 中说明不确定性。"
-                        "避免夸张或绝对化措辞，不要输出 Markdown、额外文字或代码块。"
-                    ),
+                    "content": system_prompt,
                 },
                 {"role": "user", "content": user_prompt},
             ],
@@ -398,17 +418,13 @@ class LLMService:
         if not payloads:
             return {}
         user_prompt = self._compose_batch_prompt(payloads)
+        sys_prompt = self._build_system_prompt(payloads[0].account_context, payloads[0].pnl_context)
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "你是负责数字资产量化交易分析的顾问，需输出明确且审慎的操作建议。"
-                        "必须返回可解析的 JSON，字段 action 仅能是 buy/sell/hold，confidence 为 0~1 数值，"
-                        "其余字段为简短中文字符串。数据不足或信号矛盾时默认给出 hold，并在 risk 中说明不确定性。"
-                        "避免夸张或绝对化措辞，不要输出 Markdown、额外文字或代码块。"
-                    ),
+                    "content": sys_prompt,
                 },
                 {"role": "user", "content": user_prompt},
             ],
@@ -508,9 +524,8 @@ class LLMService:
             f"交易对: {payload.inst_id}\n"
             f"周期: {payload.timeframe}\n"
             f"{payload.performance_hint}\n"
-            f"{payload.account_context}\n"
             f"{payload.position_context}\n"
-            f"{payload.pnl_context}\n"
+            f"{payload.base_strategy_hint}\n"
             f"市场快照：\n{payload.snapshot_text}\n"
             "以下为系统生成的多尺度行情摘要：\n"
             f"{payload.summary_text}\n"
@@ -529,9 +544,8 @@ class LLMService:
                 f"交易对: {payload.inst_id}\n"
                 f"周期: {payload.timeframe}\n"
                 f"{payload.performance_hint}\n"
-                f"{payload.account_context}\n"
                 f"{payload.position_context}\n"
-                f"{payload.pnl_context}\n"
+                f"{payload.base_strategy_hint}\n"
                 f"市场快照：\n{payload.snapshot_text}\n"
                 f"行情摘要：\n{payload.summary_text}\n"
             )
@@ -685,10 +699,15 @@ def _format_snapshot(snapshot: Optional[MarketSnapshot]) -> str:
 
 
 class _LLMBatchWorker:
-    def __init__(self, service: "LLMService", max_batch: int = 4, wait_seconds: float = 0.15) -> None:
+    def __init__(
+        self,
+        service: "LLMService",
+        max_batch: Optional[int] = None,
+        wait_seconds: Optional[float] = None,
+    ) -> None:
         self.service = service
-        self.max_batch = max_batch
-        self.wait_seconds = wait_seconds
+        self.max_batch = max_batch or 4
+        self.wait_seconds = wait_seconds or 0.15
         self._queue: "queue.Queue[Tuple[_LLMRequestPayload, Future]]" = queue.Queue()
         self._thread = Thread(target=self._run, daemon=True)
         self._thread.start()

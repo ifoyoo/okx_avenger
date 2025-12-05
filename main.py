@@ -18,13 +18,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich import box
-from rich.progress import (
-    Progress,
-    BarColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    SpinnerColumn,
-)
 
 from config import RuntimeSettings
 
@@ -77,6 +70,16 @@ def _estimate_worker_count(runtime_settings: RuntimeSettings) -> int:
     else:
         desired = (manual_size or 0) + (auto_target or 0)
     return max(1, min(8, desired))
+
+
+def _derive_batch_config(worker_count: int) -> Tuple[int, float]:
+    if worker_count <= 2:
+        return 2, 0.06
+    if worker_count <= 4:
+        return 4, 0.1
+    if worker_count <= 6:
+        return 6, 0.12
+    return 8, 0.15
 
 
 def _watchlist_info_text(runtime_settings: RuntimeSettings) -> str:
@@ -277,7 +280,6 @@ def _confirm_launch(console: Console) -> None:
 
     author_text = getattr(settings.runtime, "app_author", "") or ""
     typed = ""
-    start_time = perf_counter()  # noqa: F841
     extra_hold = 0.8
     hold_until: Optional[float] = None
     frame = 0
@@ -330,13 +332,10 @@ def _confirm_launch(console: Console) -> None:
         "值", style="bold white", justify="center", header_style="bold"
     )
 
+    for label, value in info_rows:
+        info_table.add_row(label, value)
     panel = Panel(info_table, title="启动信息", border_style="cyan", width=panel_width)
-    with Live(Align.center(panel), console=console, refresh_per_second=12) as live:
-        for label, value in info_rows:
-            info_table.add_row(label, value)
-            live.update(Align.center(panel))
-            time.sleep(0.25)
-    time.sleep(0.4)
+    console.print(Align.center(panel))
 
     table = Table(show_edge=False, box=None, padding=(0, 1))
     table.add_column("模块", style="bold cyan", justify="center")
@@ -351,21 +350,8 @@ def _confirm_launch(console: Console) -> None:
         ("📈 监控模块", "刷新监控资产与自动候选列表"),
         ("📣 通知模块", "准备 Telegram 推送与冷却管理"),
     ]
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=None),
-        TextColumn("{task.completed}/{task.total}"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        task_id = progress.add_task("模块初始化中…", total=len(steps))
-        for name, desc in steps:
-            progress.update(task_id, description=f"{name} 初始化中…")
-            time.sleep(0.35)
-            table.add_row(name, desc, "[bold green]✔[/bold green]")
-            progress.advance(task_id)
+    for name, desc in steps:
+        table.add_row(name, desc, "[bold green]✔[/bold green]")
     console.print(
         Align.center(
             Panel(table, title="模块加载", border_style="cyan", width=panel_width)
@@ -575,17 +561,9 @@ def _render_instrument_block(
     daily_stats: Optional[Dict[str, Any]],
     notifier: Optional[Notifier],
     notify_level: str,
-    console_width: int,
-    color_system: Optional[str],
-    no_color: bool,
     positions_map: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> Tuple[int, str]:
-    temp_console = Console(
-        width=console_width,
-        color_system=color_system,
-        no_color=no_color,
-        record=True,
-    )
+    temp_console = Console(record=True)
     process_instrument(
         engine,
         temp_console,
@@ -872,9 +850,6 @@ def run_watchlist(
                 entry.get("timeframe", "5m"),
                 higher,
             )
-    console_width = console.width or console.size.width
-    color_system = console.color_system
-    no_color = console.no_color
     futures = []
     results: List[Optional[str]] = [None] * len(refreshed)
     for idx, item in enumerate(refreshed):
@@ -889,9 +864,6 @@ def run_watchlist(
                 daily_stats,
                 notifier,
                 notify_level,
-                console_width,
-                color_system,
-                no_color,
                 positions_map,
             )
         )
@@ -918,8 +890,10 @@ def main() -> None:
         _confirm_launch(console)
         settings = get_settings()
         _configure_runtime(settings.runtime)
+        worker_count = _estimate_worker_count(settings.runtime)
+        batch_max, batch_wait = _derive_batch_config(worker_count)
         okx = OKXClient(settings)
-        llm = LLMService(settings)
+        llm = LLMService(settings, batch_max=batch_max, batch_wait=batch_wait)
         strategy = Strategy()
         try:
             market_stream = MarketDataStream()
@@ -941,7 +915,6 @@ def main() -> None:
         )
         watchlist_manager = WatchlistManager(okx, settings)
         performance_tracker = PerformanceTracker(okx)
-        worker_count = _estimate_worker_count(settings.runtime)
         executor = ThreadPoolExecutor(max_workers=worker_count)
         thresholds = ProtectionThresholds(
             take_profit_pct=getattr(settings.strategy, "default_take_profit_pct", 0.0) or 0.0,

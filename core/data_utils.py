@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List
+from typing import Iterable
 
 import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator, MACD
 from ta.volatility import AverageTrueRange, BollingerBands
+from ta.volume import OnBalanceVolumeIndicator, MFIIndicator
 
 
 CANDLE_COLUMNS = [
@@ -65,6 +66,10 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
     band_range = df["bb_high"] - df["bb_low"]
     close = df["close"].replace(0, pd.NA)
     df["bb_width"] = (band_range / close).fillna(0)
+    obv = OnBalanceVolumeIndicator(close=df["close"], volume=df["volume"])
+    df["obv"] = obv.on_balance_volume()
+    mfi = MFIIndicator(high=df["high"], low=df["low"], close=df["close"], volume=df["volume"], window=14)
+    df["mfi"] = mfi.money_flow_index()
     df.bfill(inplace=True)
     df.ffill(inplace=True)
     return df

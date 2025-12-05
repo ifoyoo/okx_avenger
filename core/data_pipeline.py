@@ -74,13 +74,20 @@ class MarketSnapshotCollector:
             "ticker": lambda: self._collect_ticker(inst_id),
         }
         results: Dict[str, Optional[object]] = {key: None for key in tasks}
-        future_map = {self._executor.submit(func): key for key, func in tasks.items()}
-        for future in as_completed(future_map):
-            key = future_map[future]
-            try:
-                results[key] = future.result()
-            except Exception:
-                results[key] = None
+        if self.stream:
+            for key, func in tasks.items():
+                try:
+                    results[key] = func()
+                except Exception:
+                    results[key] = None
+        else:
+            future_map = {self._executor.submit(func): key for key, func in tasks.items()}
+            for future in as_completed(future_map):
+                key = future_map[future]
+                try:
+                    results[key] = future.result()
+                except Exception:
+                    results[key] = None
         return MarketSnapshot(
             order_book=results["order_book"],
             trades=results["trades"],
