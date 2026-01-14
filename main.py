@@ -225,6 +225,33 @@ def send_notification(
     notifier.send(message, parse_mode="HTML")
 
 
+def _minimal_launch(console: Console) -> None:
+    """极简启动模式：无动画、无确认、快速启动."""
+    settings = get_settings()
+
+    # 构建核心信息
+    version = f"v{getattr(settings.runtime, 'app_version', None) or 'unknown'}"
+    watchlist_info = _watchlist_info_text(settings.runtime)
+    analysis_mode = "技术分析 + 指标" if settings.strategy.enable_analysis else "纯指标"
+    leverage = f"{settings.strategy.default_leverage}x"
+    tp_sl = f"{settings.strategy.default_take_profit_pct * 100:.0f}% / {settings.strategy.default_stop_loss_pct * 100:.0f}%"
+
+    # 单行紧凑显示
+    info_text = (
+        f"[bold cyan]OKX 交易引擎[/bold cyan] {version} | "
+        f"[bold yellow]{watchlist_info}[/bold yellow] | "
+        f"[bold magenta]{analysis_mode}[/bold magenta] | "
+        f"杠杆 {leverage} | 止盈/止损 {tp_sl}"
+    )
+
+    console.print(Panel(
+        Align.center(info_text),
+        border_style="green",
+        padding=(0, 2),
+    ))
+    console.print("[dim]按 Ctrl+C 随时终止[/dim]\n")
+
+
 def _confirm_launch(console: Console) -> None:
     from time import perf_counter
 
@@ -899,8 +926,15 @@ def main() -> None:
     notifier: Optional[Notifier] = None
     protection_monitor: Optional[ProtectionMonitor] = None
     try:
-        _confirm_launch(console)
         settings = get_settings()
+        startup_mode = getattr(settings.runtime, "startup_mode", "minimal").strip().lower()
+
+        # 根据配置选择启动模式
+        if startup_mode == "full":
+            _confirm_launch(console)
+        else:
+            _minimal_launch(console)
+
         _configure_runtime(settings.runtime)
         worker_count = _estimate_worker_count(settings.runtime)
         batch_max, batch_wait = _derive_batch_config(worker_count)

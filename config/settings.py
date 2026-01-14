@@ -63,6 +63,7 @@ class RuntimeSettings(SettingsBase):
     protection_monitor_interval_seconds: float = Field(
         30.0, alias="PROTECTION_MONITOR_INTERVAL_SECONDS"
     )
+    startup_mode: str = Field("minimal", alias="STARTUP_MODE")
 
 
 class NotificationSettings(SettingsBase):
