@@ -2,7 +2,6 @@
 
 from .settings import (
     AccountSettings,
-    AISettings,
     StrategySettings,
     RuntimeSettings,
     AppSettings,
@@ -11,7 +10,6 @@ from .settings import (
 
 __all__ = [
     "AccountSettings",
-    "AISettings",
     "StrategySettings",
     "RuntimeSettings",
     "AppSettings",

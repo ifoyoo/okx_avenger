@@ -37,44 +37,13 @@ class AccountSettings(SettingsBase):
         return normalized or None
 
 
-class AISettings(SettingsBase):
-    provider: str = Field("deepseek", alias="AI_PROVIDER")
-
-    deepseek_api_key: Optional[str] = Field(default=None, alias="DEEPSEEK_API_KEY")
-    deepseek_model: str = Field("deepseek-chat", alias="DEEPSEEK_MODEL")
-    deepseek_base_url: str = Field("https://api.deepseek.com/v1", alias="DEEPSEEK_BASE_URL")
-
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    openai_model: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
-    openai_base_url: str = Field("https://api.openai.com/v1", alias="OPENAI_BASE_URL")
-
-    azure_api_key: Optional[str] = Field(default=None, alias="AZURE_API_KEY")
-    azure_endpoint: Optional[str] = Field(default=None, alias="AZURE_ENDPOINT")
-    azure_deployment: Optional[str] = Field(default=None, alias="AZURE_DEPLOYMENT")
-    azure_api_version: str = Field("2024-05-01-preview", alias="AZURE_API_VERSION")
-
-    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
-    anthropic_model: str = Field("claude-3-sonnet-20240229", alias="ANTHROPIC_MODEL")
-    anthropic_base_url: str = Field("https://api.anthropic.com", alias="ANTHROPIC_BASE_URL")
-
-    moonshot_api_key: Optional[str] = Field(default=None, alias="MOONSHOT_API_KEY")
-    moonshot_model: str = Field("moonshot-v1-8k", alias="MOONSHOT_MODEL")
-    moonshot_base_url: str = Field("https://api.moonshot.cn/v1", alias="MOONSHOT_BASE_URL")
-
-    qwen_api_key: Optional[str] = Field(default=None, alias="QWEN_API_KEY")
-    qwen_model: str = Field("qwen-plus", alias="QWEN_MODEL")
-    qwen_base_url: str = Field("https://dashscope.aliyuncs.com/compatible-mode/v1", alias="QWEN_BASE_URL")
-
-    grok_api_key: Optional[str] = Field(default=None, alias="GROK_API_KEY")
-    grok_model: str = Field("grok-beta", alias="GROK_MODEL")
-    grok_base_url: str = Field("https://api.x.ai/v1", alias="GROK_BASE_URL")
-
-
 class StrategySettings(SettingsBase):
     balance_usage_ratio: float = Field(0.7, alias="BALANCE_USAGE_RATIO")
     default_leverage: float = Field(1.0, alias="DEFAULT_LEVERAGE")
     default_take_profit_pct: float = Field(0.35, alias="DEFAULT_TAKE_PROFIT_PCT")
     default_stop_loss_pct: float = Field(0.2, alias="DEFAULT_STOP_LOSS_PCT")
+    enable_analysis: bool = Field(True, alias="ENABLE_ANALYSIS")
+    analysis_weight: float = Field(0.5, alias="ANALYSIS_WEIGHT")
 
 
 class RuntimeSettings(SettingsBase):
@@ -108,7 +77,6 @@ class NotificationSettings(SettingsBase):
 @dataclass(frozen=True)
 class AppSettings:
     account: AccountSettings
-    ai: AISettings
     strategy: StrategySettings
     runtime: RuntimeSettings
     notification: NotificationSettings
@@ -118,7 +86,6 @@ class AppSettings:
 def get_settings() -> AppSettings:
     return AppSettings(
         account=AccountSettings(),
-        ai=AISettings(),
         strategy=StrategySettings(),
         runtime=RuntimeSettings(),
         notification=NotificationSettings(),

@@ -8,3 +8,5 @@ llm-cache.json
 llm-decisions.jsonl
 .okx-cache/
 data/perf_cache.json
+.ace-tool/
+okx_backup_*/

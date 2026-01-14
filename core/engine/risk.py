@@ -11,7 +11,7 @@ from loguru import logger
 
 from core.models import SignalAction, TradeSignal
 from core.strategy.core import (
-    LLMView,
+    AnalysisView,
     ObjectiveSignal,
     ObjectiveSignalGenerator,
     StrategyOutput,
@@ -87,8 +87,8 @@ class RiskManager:
             notes.append(env_note)
 
         # 信号层风控
-        llm_view = strategy_output.llm_view
-        self._apply_llm_risk(llm_view, notes)
+        analysis_view = strategy_output.analysis_view
+        self._apply_llm_risk(analysis_view, notes)
         higher_conflict = self._detect_trend_conflict(strategy_output.objective_signals, action)
         if higher_conflict:
             blocked = True
@@ -125,12 +125,12 @@ class RiskManager:
         )
 
     @staticmethod
-    def _apply_llm_risk(llm_view: LLMView, notes: list[str]) -> None:
-        if not llm_view.risk:
+    def _apply_llm_risk(analysis_view: AnalysisView, notes: list[str]) -> None:
+        if not analysis_view.risk:
             return
         keywords = ("不确定", "高风险", "谨慎")
-        if any(word in llm_view.risk for word in keywords):
-            notes.append(f"LLM 风险提示：{llm_view.risk}")
+        if any(word in analysis_view.risk for word in keywords):
+            notes.append(f"分析风险提示：{analysis_view.risk}")
 
     @staticmethod
     def _detect_trend_conflict(

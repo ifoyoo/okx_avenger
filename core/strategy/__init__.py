@@ -1,19 +1,16 @@
-"""Strategy package exports (LLM + fusion logic)."""
+"""Strategy package exports (analysis + fusion logic)."""
 
 from .core import (
-    LLMView,
+    AnalysisView,
     ObjectiveSignal,
     ObjectiveSignalGenerator,
     Strategy,
     StrategyOutput,
 )
-from .llm import LLMAnalysis, LLMService
 from .positioning import PositionSizer, PositionSizerConfig
 
 __all__ = [
-    "LLMAnalysis",
-    "LLMService",
-    "LLMView",
+    "AnalysisView",
     "ObjectiveSignal",
     "ObjectiveSignalGenerator",
     "PositionSizer",

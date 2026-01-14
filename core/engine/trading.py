@@ -13,7 +13,7 @@ from loguru import logger
 
 from core.client import MarketDataStream, OKXClient
 from core.data.features import candles_to_dataframe
-from core.strategy.llm import LLMService, DecisionLogger, DecisionRecord
+from core.analysis import MarketAnalyzer, DecisionLogger, DecisionRecord
 from core.engine.execution import ExecutionEngine, ExecutionReport
 from core.data.snapshot import MarketSnapshotCollector
 from core.models import (
@@ -32,13 +32,13 @@ class TradingEngine:
     def __init__(
         self,
         okx_client: OKXClient,
-        deepseek_service: LLMService,
+        analyzer: MarketAnalyzer,
         strategy: Strategy,
         settings: AppSettings,
         market_stream: Optional[MarketDataStream] = None,
     ) -> None:
         self.okx = okx_client
-        self.deepseek = deepseek_service
+        self.analyzer = analyzer
         self.strategy = strategy
         self.settings = settings
         self.account_settings = settings.account
@@ -89,7 +89,7 @@ class TradingEngine:
         snapshot = self.snapshot_collector.build(inst_id)
         account_snapshot = account_snapshot or self._fetch_account_snapshot()
         risk_note = self._build_risk_note(account_snapshot)
-        analysis_result = self.deepseek.analyze(
+        analysis_result = self.analyzer.analyze(
             inst_id,
             timeframe,
             features,
@@ -115,6 +115,8 @@ class TradingEngine:
             account_equity=account_snapshot.get("equity"),
             available_balance=account_snapshot.get("available"),
             protection=build_protection_settings(protection_config),
+            enable_analysis=self.strategy_settings.enable_analysis,
+            analysis_weight=self.strategy_settings.analysis_weight,
         )
         strategy_output = self.strategy.generate_signal(context, features, analysis, higher_features)
         risk_assessment = self.risk_manager.evaluate(account_state, features, higher_features, strategy_output)

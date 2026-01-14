@@ -3,35 +3,34 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import schedule
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
+from rich import box
 from rich.align import Align
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
 from config import RuntimeSettings
-
-from core.client import MarketDataStream, OKXClient
-from core.strategy.llm import LLMService
-from core.engine.trading import TradingEngine
-from core.engine.execution import ExecutionPlan, ExecutionReport
-from core.models import ProtectionTarget, TradeSignal
 from config.settings import get_settings
-from core.strategy.core import Strategy
+from core.client import MarketDataStream, OKXClient
 from core.data.performance import PerformanceTracker
-from core.utils.notifications import Notifier, build_notifier
-from core.engine.protection import ProtectionMonitor, ProtectionThresholds
 from core.data.watchlist_loader import WatchlistManager, load_watchlist
+from core.engine.execution import ExecutionPlan, ExecutionReport
+from core.engine.protection import ProtectionMonitor, ProtectionThresholds
+from core.engine.trading import TradingEngine
+from core.models import ProtectionTarget, TradeSignal
+from core.strategy.core import Strategy
+from core.analysis import MarketAnalyzer
+from core.utils.notifications import Notifier, build_notifier
 
 ACTION_EMOJI = {
     "buy": "🟢",
@@ -316,7 +315,10 @@ def _confirm_launch(console: Console) -> None:
             "💰 最大资金",
             f"可用资金的 {settings.strategy.balance_usage_ratio:.0%}",
         ),
-        ("🤖 当前 LLM", settings.ai.provider.upper()),
+        (
+            "🤖 分析模式",
+            "技术分析 + 指标" if settings.strategy.enable_analysis else "纯指标",
+        ),
         (
             "🎯 止盈 / ⚠️ 止损",
             f"{settings.strategy.default_take_profit_pct * 100:.0f}% / {settings.strategy.default_stop_loss_pct * 100:.0f}%",
@@ -342,7 +344,7 @@ def _confirm_launch(console: Console) -> None:
     table.add_column("状态", style="bold white", justify="center")
     steps = [
         ("⚙️  引擎模块", "加载核心依赖与运行环境"),
-        ("🧠 策略模块", "初始化策略逻辑与 LLM 分析"),
+        ("🧠 策略模块", "初始化策略逻辑与市场分析"),
         ("🛡️  风控模块", "准备账户风控参数与资金快照"),
         ("🚀 执行模块", "连接 OKX 下单接口并校验"),
         ("💹 交易模块", "检查账户仓位、持仓模式与限制"),
@@ -422,7 +424,9 @@ def process_instrument(
             higher_timeframes=higher_timeframes,
             account_snapshot=account_snapshot,
             protection_overrides=protection_overrides,
-            positions_snapshot=(positions_map.get(inst_id.upper()) if positions_map else None),
+            positions_snapshot=(
+                positions_map.get(inst_id.upper()) if positions_map else None
+            ),
             perf_stats=perf_stats,
             daily_stats=daily_stats,
         )
@@ -433,6 +437,8 @@ def process_instrument(
     signal: TradeSignal = result["signal"]
     summary_text = result.get("analysis_summary")
     history_hint = result.get("history_hint")
+    enable_analysis = engine.strategy_settings.enable_analysis
+
     if summary_text:
         render_info_panel(
             console, "行情摘要", Markdown(summary_text), style="bold cyan"
@@ -441,8 +447,12 @@ def process_instrument(
         render_info_panel(
             console, "历史表现", Markdown(history_hint), style="bold cyan"
         )
+
+    # 根据分析模式调整标题
+    analysis_title = "市场分析" if enable_analysis else "市场分析（纯指标模式）"
+    analysis_style = "bold magenta" if enable_analysis else "bold cyan"
     render_info_panel(
-        console, "LLM 分析", Markdown(result["analysis"]), style="bold magenta"
+        console, analysis_title, Markdown(result["analysis"]), style=analysis_style
     )
     summary_line = (
         f"{result['signal'].action.value.upper()} @ {timeframe} "
@@ -895,7 +905,7 @@ def main() -> None:
         worker_count = _estimate_worker_count(settings.runtime)
         batch_max, batch_wait = _derive_batch_config(worker_count)
         okx = OKXClient(settings)
-        llm = LLMService(settings, batch_max=batch_max, batch_wait=batch_wait)
+        analyzer = MarketAnalyzer(settings)
         strategy = Strategy()
         try:
             market_stream = MarketDataStream()
@@ -913,20 +923,25 @@ def main() -> None:
         )
         notify_level = (settings.notification.level or "critical").strip().lower()
         engine = TradingEngine(
-            okx, llm, strategy, settings, market_stream=market_stream
+            okx, analyzer, strategy, settings, market_stream=market_stream
         )
         watchlist_manager = WatchlistManager(okx, settings)
         performance_tracker = PerformanceTracker(okx)
         executor = ThreadPoolExecutor(max_workers=worker_count)
         thresholds = ProtectionThresholds(
-            take_profit_pct=getattr(settings.strategy, "default_take_profit_pct", 0.0) or 0.0,
-            stop_loss_pct=getattr(settings.strategy, "default_stop_loss_pct", 0.0) or 0.0,
+            take_profit_pct=getattr(settings.strategy, "default_take_profit_pct", 0.0)
+            or 0.0,
+            stop_loss_pct=getattr(settings.strategy, "default_stop_loss_pct", 0.0)
+            or 0.0,
         )
         protection_monitor = ProtectionMonitor(
             okx_client=okx,
             thresholds=thresholds,
             default_td_mode=settings.account.okx_td_mode or "cross",
-            interval_seconds=getattr(settings.runtime, "protection_monitor_interval_seconds", 30.0) or 30.0,
+            interval_seconds=getattr(
+                settings.runtime, "protection_monitor_interval_seconds", 30.0
+            )
+            or 30.0,
         )
         protection_monitor.start()
 

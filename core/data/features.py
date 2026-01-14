@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Iterable
 
 import pandas as pd
-from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator, MACD
+from ta.momentum import RSIIndicator, StochasticOscillator, WilliamsRIndicator
+from ta.trend import EMAIndicator, MACD, CCIIndicator, ADXIndicator, IchimokuIndicator
 from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import OnBalanceVolumeIndicator, MFIIndicator
 
@@ -70,6 +70,51 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
     df["obv"] = obv.on_balance_volume()
     mfi = MFIIndicator(high=df["high"], low=df["low"], close=df["close"], volume=df["volume"], window=14)
     df["mfi"] = mfi.money_flow_index()
+
+    # 新增指标：Stochastic Oscillator
+    stoch = StochasticOscillator(
+        high=df["high"], low=df["low"], close=df["close"],
+        window=14, smooth_window=3
+    )
+    df["stoch_k"] = stoch.stoch()
+    df["stoch_d"] = stoch.stoch_signal()
+
+    # 新增指标：KDJ (基于 Stochastic 派生)
+    df["kdj_j"] = 3 * df["stoch_k"] - 2 * df["stoch_d"]
+
+    # 新增指标：CCI (商品通道指标)
+    cci = CCIIndicator(
+        high=df["high"], low=df["low"], close=df["close"],
+        window=20
+    )
+    df["cci"] = cci.cci()
+
+    # 新增指标：ADX (趋势强度指标)
+    adx = ADXIndicator(
+        high=df["high"], low=df["low"], close=df["close"],
+        window=14
+    )
+    df["adx"] = adx.adx()
+    df["adx_pos"] = adx.adx_pos()
+    df["adx_neg"] = adx.adx_neg()
+
+    # 新增指标：Williams %R
+    williams = WilliamsRIndicator(
+        high=df["high"], low=df["low"], close=df["close"],
+        lbp=14
+    )
+    df["williams_r"] = williams.williams_r()
+
+    # 新增指标：Ichimoku (一目均衡表)
+    ichimoku = IchimokuIndicator(
+        high=df["high"], low=df["low"],
+        window1=9, window2=26, window3=52
+    )
+    df["ichimoku_conv"] = ichimoku.ichimoku_conversion_line()
+    df["ichimoku_base"] = ichimoku.ichimoku_base_line()
+    df["ichimoku_a"] = ichimoku.ichimoku_a()
+    df["ichimoku_b"] = ichimoku.ichimoku_b()
+
     df.bfill(inplace=True)
     df.ffill(inplace=True)
     return df

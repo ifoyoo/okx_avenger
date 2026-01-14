@@ -90,3 +90,5 @@ class StrategyContext:
     account_equity: Optional[float] = None
     available_balance: Optional[float] = None
     protection: Optional[ProtectionSettings] = None
+    enable_analysis: bool = True
+    analysis_weight: float = 0.5
