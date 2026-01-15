@@ -225,38 +225,11 @@ def send_notification(
     notifier.send(message, parse_mode="HTML")
 
 
-def _minimal_launch(console: Console) -> None:
-    """极简启动模式：无动画、无确认、快速启动."""
-    settings = get_settings()
-
-    # 构建核心信息
-    version = f"v{getattr(settings.runtime, 'app_version', None) or 'unknown'}"
-    watchlist_info = _watchlist_info_text(settings.runtime)
-    leverage = f"{settings.strategy.default_leverage}x"
-    tp_sl = f"{settings.strategy.default_take_profit_pct * 100:.0f}% / {settings.strategy.default_stop_loss_pct * 100:.0f}%"
-
-    # 单行紧凑显示
-    info_text = (
-        f"[bold cyan]OKX 交易引擎[/bold cyan] {version} | "
-        f"[bold yellow]{watchlist_info}[/bold yellow] | "
-        f"杠杆 {leverage} | 止盈/止损 {tp_sl}"
-    )
-
-    console.print(Panel(
-        Align.center(info_text),
-        border_style="green",
-        padding=(0, 2),
-    ))
-    console.print("[dim]按 Ctrl+C 随时终止[/dim]\n")
-
-
 def _confirm_launch(console: Console) -> None:
-    from time import perf_counter
-
-    from rich.live import Live
-
     settings = get_settings()
-    panel_width = 60
+    panel_width = 70  # 调整宽度 60→70
+
+    # 静态 Logo（无动画）
     o_lines = [
         " █████ ",
         "██   ██",
@@ -278,52 +251,31 @@ def _confirm_launch(console: Console) -> None:
         " ██ ██ ",
         "██   ██",
     ]
-    logo_lines = [f"{o}  {k}  {x}" for o, k, x in zip(o_lines, k_lines, x_lines)]
-    gradient = ["#39FF14", "#00FFC6", "#00E0FF", "#00A3FF", "#39FF14"]
 
-    def build_gradient_logo(frame: int, signature_markup: str = "") -> Panel:
-        logo = Text()
-        for line in logo_lines:
-            for idx, char in enumerate(line):
-                color = gradient[(idx + frame) % len(gradient)]
-                logo.append(char, style=f"bold {color}")
-            logo.append("\n")
-        block = logo
-        if signature_markup:
-            block.append("\n")
-            block.append(Text.from_markup(signature_markup))
-        return Align.center(
+    # 构建静态 Logo
+    logo = Text()
+    for o, k, x in zip(o_lines, k_lines, x_lines):
+        line = f"{o}  {k}  {x}"
+        logo.append(line, style="bold cyan")
+        logo.append("\n")
+
+    # 添加作者名（无打字机效果）
+    author_text = getattr(settings.runtime, "app_author", "") or ""
+    if author_text:
+        logo.append("\n")
+        logo.append(author_text, style="bold cyan")
+
+    # 显示 Logo
+    console.print(
+        Align.center(
             Panel(
-                Align.center(block, vertical="middle"),
-                border_style="bright_cyan",
+                Align.center(logo, vertical="middle"),
+                border_style="cyan",
                 padding=(1, 4),
                 width=panel_width,
             )
         )
-
-    author_text = getattr(settings.runtime, "app_author", "") or ""
-    typed = ""
-    extra_hold = 0.8
-    hold_until: Optional[float] = None
-    frame = 0
-    with Live(
-        build_gradient_logo(frame), console=console, refresh_per_second=18
-    ) as live:
-        while True:
-            if len(typed) < len(author_text):
-                typed += author_text[len(typed)]
-                if len(typed) == len(author_text):
-                    hold_until = perf_counter() + extra_hold
-            frame += 1
-            signature_markup = f"[bold cyan]{typed}[/]"
-            live.update(build_gradient_logo(frame, signature_markup))
-            time.sleep(0.08)
-            if (
-                len(typed) == len(author_text)
-                and hold_until
-                and perf_counter() >= hold_until
-            ):
-                break
+    )
 
     info_rows = [
         (
@@ -359,31 +311,11 @@ def _confirm_launch(console: Console) -> None:
     panel = Panel(info_table, title="启动信息", border_style="cyan", width=panel_width)
     console.print(Align.center(panel))
 
-    table = Table(show_edge=False, box=None, padding=(0, 1))
-    table.add_column("模块", style="bold cyan", justify="center")
-    table.add_column("说明", style="white", justify="center")
-    table.add_column("状态", style="bold white", justify="center")
-    steps = [
-        ("⚙️  引擎模块", "加载核心依赖与运行环境"),
-        ("🧠 策略模块", "初始化策略逻辑与市场分析"),
-        ("🛡️  风控模块", "准备账户风控参数与资金快照"),
-        ("🚀 执行模块", "连接 OKX 下单接口并校验"),
-        ("💹 交易模块", "检查账户仓位、持仓模式与限制"),
-        ("📈 监控模块", "刷新监控资产与自动候选列表"),
-        ("📣 通知模块", "准备 Telegram 推送与冷却管理"),
-    ]
-    for name, desc in steps:
-        table.add_row(name, desc, "[bold green]✔[/bold green]")
-    console.print(
-        Align.center(
-            Panel(table, title="模块加载", border_style="cyan", width=panel_width)
-        )
-    )
     console.print(
         Align.center(
             Panel(
                 "[bold green]OKX 交易引擎已就绪！左舷火力太弱，让我们荡起双桨！！！[/bold green]",
-                border_style="green",
+                border_style="cyan",
                 width=panel_width,
             )
         )
@@ -918,13 +850,7 @@ def main() -> None:
     protection_monitor: Optional[ProtectionMonitor] = None
     try:
         settings = get_settings()
-        startup_mode = getattr(settings.runtime, "startup_mode", "minimal").strip().lower()
-
-        # 根据配置选择启动模式
-        if startup_mode == "full":
-            _confirm_launch(console)
-        else:
-            _minimal_launch(console)
+        _confirm_launch(console)
 
         _configure_runtime(settings.runtime)
         worker_count = _estimate_worker_count(settings.runtime)
