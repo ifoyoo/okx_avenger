@@ -308,13 +308,17 @@ def _confirm_launch(console: Console) -> None:
 
     for label, value in info_rows:
         info_table.add_row(label, value)
-    panel = Panel(info_table, title="启动信息", border_style="cyan", width=panel_width)
+    panel = Panel(
+        Align.center(info_table), title="启动信息", border_style="cyan", width=panel_width
+    )
     console.print(Align.center(panel))
 
     console.print(
         Align.center(
             Panel(
-                "[bold green]OKX 交易引擎已就绪！左舷火力太弱，让我们荡起双桨！！！[/bold green]",
+                Align.center(
+                    "[bold green]OKX 交易引擎已就绪！左舷火力太弱，让我们荡起双桨！！！[/bold green]"
+                ),
                 border_style="cyan",
                 width=panel_width,
             )
