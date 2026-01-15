@@ -39,7 +39,7 @@ HIGH_VOL_ENV_THRESHOLD = 0.025
 
 @dataclass
 class AnalysisView:
-    """分析视图（原 LLM 视图）."""
+    """分析视图."""
     action: SignalAction
     confidence: float
     reason: str = ""
@@ -73,7 +73,7 @@ class StrategyOutput:
 
 
 class AnalysisInterpreter:
-    """负责解析与校验分析结构（原 LLM 解释器）."""
+    """负责解析与校验分析结构."""
 
     def parse(self, text: str) -> AnalysisView:
         structured = self._extract_structured_json(text)
@@ -468,7 +468,7 @@ class ObjectiveSignalGenerator:
 
 
 class SignalFusionEngine:
-    """融合客观指标与分析观点（原 LLM 观点）."""
+    """融合客观指标与分析观点."""
 
     SUPPORTIVE_NAMES = {"volume_pressure", "volatility_breakout"}
 
@@ -498,34 +498,6 @@ class SignalFusionEngine:
             notes.append(f"{label}：{support.note}")
         action, confidence = self._combine_actions(base_action, base_conf, analysis_view.action, analysis_view.confidence)
         return FusionResult(action=action, confidence=confidence, notes=tuple(note for note in notes if note))
-
-    def fuse_indicator_only(self, objective_signals: Sequence[ObjectiveSignal]) -> FusionResult:
-        """纯指标模式的信号融合，不使用 LLM."""
-        indicator = self._get_signal(objective_signals, "indicator")
-        higher_tf = self._get_signal(objective_signals, "higher_timeframe")
-        base_action = indicator.action if indicator else SignalAction.HOLD
-        base_conf = indicator.confidence if indicator else 0.4
-        notes: List[str] = []
-        if higher_tf and higher_tf.action != SignalAction.HOLD:
-            if higher_tf.action == base_action:
-                base_conf = min(1.0, base_conf + 0.15 * max(0.5, higher_tf.confidence))
-            else:
-                base_conf = max(0.2, base_conf - 0.2 * max(0.5, higher_tf.confidence))
-            notes.append(f"多周期：{higher_tf.note}")
-        for support in objective_signals:
-            if support.name not in self.SUPPORTIVE_NAMES or support.action == SignalAction.HOLD:
-                continue
-            label = "成交量" if support.name == "volume_pressure" else "波动" if support.name == "volatility_breakout" else support.name
-            if base_action == SignalAction.HOLD:
-                base_action = support.action
-                base_conf = support.confidence
-            elif support.action == base_action:
-                base_conf = min(1.0, base_conf + 0.1 * max(0.3, support.confidence))
-            else:
-                base_conf = max(0.2, base_conf - 0.1 * max(0.3, support.confidence))
-            notes.append(f"{label}：{support.note}")
-        notes.append("纯指标模式：未使用 LLM 分析")
-        return FusionResult(action=base_action, confidence=base_conf, notes=tuple(notes))
 
     @staticmethod
     def _get_signal(signals: Sequence[ObjectiveSignal], name: str) -> Optional[ObjectiveSignal]:
@@ -572,19 +544,9 @@ class Strategy:
     ) -> StrategyOutput:
         objective_signals = self.signal_generator.build(features, higher_features)
 
-        # 根据配置决定是否使用分析
-        if context.enable_analysis:
-            analysis_view = self.analysis_interpreter.parse(analysis_text)
-            fusion = self.fusion_engine.fuse(objective_signals, analysis_view)
-        else:
-            # 纯指标模式：使用默认分析视图（HOLD）
-            analysis_view = AnalysisView(
-                action=SignalAction.HOLD,
-                confidence=0.0,
-                reason="分析已禁用，仅使用技术指标",
-                raw_text="纯指标模式"
-            )
-            fusion = self.fusion_engine.fuse_indicator_only(objective_signals)
+        # 使用市场分析
+        analysis_view = self.analysis_interpreter.parse(analysis_text)
+        fusion = self.fusion_engine.fuse(objective_signals, analysis_view)
 
         latest = features.iloc[-1]
         liquidity_ok, liquidity_note = self.signal_generator.liquidity_snapshot(features)
@@ -625,7 +587,7 @@ class Strategy:
             protection, protection_note = self._build_trade_protection(context, latest, action)
         reason_sections = self._build_reason_sections(
             objective_signals=objective_signals,
-            llm_view=analysis_view,
+            analysis_view=analysis_view,
             context=context,
             fusion_notes=notes,
             analysis_text=analysis_text,
@@ -662,14 +624,14 @@ class Strategy:
         return StrategyOutput(
             trade_signal=trade_signal,
             objective_signals=objective_signals,
-            llm_view=analysis_view,
+            analysis_view=analysis_view,
             fusion_notes=tuple(notes),
         )
 
     @staticmethod
     def _build_reason_sections(
         objective_signals: Sequence[ObjectiveSignal],
-        llm_view: AnalysisView,
+        analysis_view: AnalysisView,
         context: StrategyContext,
         fusion_notes: Sequence[str],
         analysis_text: str,
@@ -692,16 +654,16 @@ class Strategy:
             }
             label = label_map.get(sig.name, sig.name)
             sections.append(f"{label}：{sig.action.value.upper()} (置信 {sig.confidence:.2f}) - {sig.note}")
-        reason_text = llm_view.reason or analysis_text.strip()
+        reason_text = analysis_view.reason or analysis_text.strip()
         sections.append(
-            f"分析观点：{llm_view.action.value.upper()} (置信 {llm_view.confidence:.2f}) - {reason_text}"
+            f"分析观点：{analysis_view.action.value.UPPER()} (置信 {analysis_view.confidence:.2f}) - {reason_text}"
         )
-        if llm_view.risk:
-            sections.append(f"风险提示：{llm_view.risk}")
-        if llm_view.time_horizon:
-            sections.append(f"适用周期：{llm_view.time_horizon}")
-        if llm_view.invalid_conditions:
-            sections.append(f"失效条件：{llm_view.invalid_conditions}")
+        if analysis_view.risk:
+            sections.append(f"风险提示：{analysis_view.risk}")
+        if analysis_view.time_horizon:
+            sections.append(f"适用周期：{analysis_view.time_horizon}")
+        if analysis_view.invalid_conditions:
+            sections.append(f"失效条件：{analysis_view.invalid_conditions}")
         if context.risk_note:
             sections.append(f"账户提示：{context.risk_note}")
         for note in fusion_notes:

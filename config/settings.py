@@ -42,8 +42,6 @@ class StrategySettings(SettingsBase):
     default_leverage: float = Field(1.0, alias="DEFAULT_LEVERAGE")
     default_take_profit_pct: float = Field(0.35, alias="DEFAULT_TAKE_PROFIT_PCT")
     default_stop_loss_pct: float = Field(0.2, alias="DEFAULT_STOP_LOSS_PCT")
-    enable_analysis: bool = Field(True, alias="ENABLE_ANALYSIS")
-    analysis_weight: float = Field(0.5, alias="ANALYSIS_WEIGHT")
 
 
 class RuntimeSettings(SettingsBase):

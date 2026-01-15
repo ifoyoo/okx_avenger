@@ -1,4 +1,4 @@
-"""市场分析模块（替代 LLM 分析）."""
+"""市场分析模块."""
 
 from .market import MarketAnalyzer, MarketAnalysis
 from .logger import DecisionLogger, DecisionRecord, build_performance_hint

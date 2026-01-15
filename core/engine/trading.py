@@ -115,8 +115,6 @@ class TradingEngine:
             account_equity=account_snapshot.get("equity"),
             available_balance=account_snapshot.get("available"),
             protection=build_protection_settings(protection_config),
-            enable_analysis=self.strategy_settings.enable_analysis,
-            analysis_weight=self.strategy_settings.analysis_weight,
         )
         strategy_output = self.strategy.generate_signal(context, features, analysis, higher_features)
         risk_assessment = self.risk_manager.evaluate(account_state, features, higher_features, strategy_output)
@@ -503,21 +501,20 @@ class TradingEngine:
             ts_value = features.iloc[-1].get("ts", "")
             timestamp = str(ts_value)
             close_price = float(features.iloc[-1].get("close", 0.0) or 0.0)
-            llm_view = strategy_output.llm_view
+            analysis_view = strategy_output.analysis_view
             record = DecisionRecord(
                 timestamp=timestamp,
                 inst_id=inst_id,
                 timeframe=timeframe,
-                summary=summary,
-                llm_action=llm_view.action.value,
-                llm_confidence=llm_view.confidence,
-                llm_reason=llm_view.reason,
+                analysis_action=analysis_view.action.value,
+                analysis_confidence=analysis_view.confidence,
+                analysis_reason=analysis_view.reason,
                 strategy_action=signal.action.value,
                 close_price=close_price,
             )
             self.decision_logger.log(record)
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"记录 LLM 决策失败: {exc}")
+            logger.warning(f"记录决策失败: {exc}")
 
     @staticmethod
     def _to_account_state(snapshot: Dict[str, float]) -> AccountState:

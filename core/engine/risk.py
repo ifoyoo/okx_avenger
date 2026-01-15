@@ -88,7 +88,7 @@ class RiskManager:
 
         # 信号层风控
         analysis_view = strategy_output.analysis_view
-        self._apply_llm_risk(analysis_view, notes)
+        self._apply_analysis_risk(analysis_view, notes)
         higher_conflict = self._detect_trend_conflict(strategy_output.objective_signals, action)
         if higher_conflict:
             blocked = True
@@ -125,7 +125,7 @@ class RiskManager:
         )
 
     @staticmethod
-    def _apply_llm_risk(analysis_view: AnalysisView, notes: list[str]) -> None:
+    def _apply_analysis_risk(analysis_view: AnalysisView, notes: list[str]) -> None:
         if not analysis_view.risk:
             return
         keywords = ("不确定", "高风险", "谨慎")

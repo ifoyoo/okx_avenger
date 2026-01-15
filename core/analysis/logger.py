@@ -1,4 +1,4 @@
-"""决策日志模块（从 core/strategy/llm.py 迁移）."""
+"""决策日志模块."""
 
 from __future__ import annotations
 
@@ -39,9 +39,9 @@ class DecisionRecord:
             "inst_id": self.inst_id,
             "timeframe": self.timeframe,
             "timestamp": self.timestamp,
-            "llm_action": self.analysis_action,  # 保持字段名兼容
-            "llm_confidence": self.analysis_confidence,
-            "llm_reason": self.analysis_reason,
+            "analysis_action": self.analysis_action,
+            "analysis_confidence": self.analysis_confidence,
+            "analysis_reason": self.analysis_reason,
             "strategy_action": self.strategy_action,
             "close_price": self.close_price,
         }
@@ -136,7 +136,7 @@ def build_performance_hint(inst_id: str, timeframe: str, window: int = 30) -> st
     for idx in range(len(records) - 1):
         current = records[idx]
         nxt = records[idx + 1]
-        action = (current.get("llm_action") or "").lower()
+        action = (current.get("analysis_action") or current.get("llm_action") or "").lower()
         if action not in ("buy", "sell"):
             continue
         curr_price = float(current.get("close_price") or 0.0)

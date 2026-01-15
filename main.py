@@ -232,7 +232,6 @@ def _minimal_launch(console: Console) -> None:
     # 构建核心信息
     version = f"v{getattr(settings.runtime, 'app_version', None) or 'unknown'}"
     watchlist_info = _watchlist_info_text(settings.runtime)
-    analysis_mode = "技术分析 + 指标" if settings.strategy.enable_analysis else "纯指标"
     leverage = f"{settings.strategy.default_leverage}x"
     tp_sl = f"{settings.strategy.default_take_profit_pct * 100:.0f}% / {settings.strategy.default_stop_loss_pct * 100:.0f}%"
 
@@ -240,7 +239,6 @@ def _minimal_launch(console: Console) -> None:
     info_text = (
         f"[bold cyan]OKX 交易引擎[/bold cyan] {version} | "
         f"[bold yellow]{watchlist_info}[/bold yellow] | "
-        f"[bold magenta]{analysis_mode}[/bold magenta] | "
         f"杠杆 {leverage} | 止盈/止损 {tp_sl}"
     )
 
@@ -341,10 +339,6 @@ def _confirm_launch(console: Console) -> None:
         (
             "💰 最大资金",
             f"可用资金的 {settings.strategy.balance_usage_ratio:.0%}",
-        ),
-        (
-            "🤖 分析模式",
-            "技术分析 + 指标" if settings.strategy.enable_analysis else "纯指标",
         ),
         (
             "🎯 止盈 / ⚠️ 止损",
@@ -464,7 +458,6 @@ def process_instrument(
     signal: TradeSignal = result["signal"]
     summary_text = result.get("analysis_summary")
     history_hint = result.get("history_hint")
-    enable_analysis = engine.strategy_settings.enable_analysis
 
     if summary_text:
         render_info_panel(
@@ -475,11 +468,9 @@ def process_instrument(
             console, "历史表现", Markdown(history_hint), style="bold cyan"
         )
 
-    # 根据分析模式调整标题
-    analysis_title = "市场分析" if enable_analysis else "市场分析（纯指标模式）"
-    analysis_style = "bold magenta" if enable_analysis else "bold cyan"
+    # 市场分析
     render_info_panel(
-        console, analysis_title, Markdown(result["analysis"]), style=analysis_style
+        console, "市场分析", Markdown(result["analysis"]), style="bold magenta"
     )
     summary_line = (
         f"{result['signal'].action.value.upper()} @ {timeframe} "

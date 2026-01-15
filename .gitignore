@@ -4,8 +4,6 @@ __pycache__/
 logs/
 *.log
 data/auto_watchlist.json
-llm-cache.json
-llm-decisions.jsonl
 .okx-cache/
 data/perf_cache.json
 .ace-tool/

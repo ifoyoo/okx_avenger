@@ -1,4 +1,4 @@
-"""市场分析器：基于技术指标和结构的确定性分析（替代 LLM）."""
+"""市场分析器：基于技术指标和结构的确定性分析."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .logger import build_performance_hint
 
 @dataclass
 class MarketAnalysis:
-    """市场分析结果（替代 LLMAnalysis）."""
+    """市场分析结果."""
 
     text: str  # 结构化分析文本
     summary: str  # 市场摘要
@@ -38,7 +38,7 @@ class MarketAnalysis:
 
 
 class MarketAnalyzer:
-    """市场分析器（替代 LLMService）."""
+    """市场分析器."""
 
     def __init__(self, settings: AppSettings) -> None:
         self.settings = settings
@@ -112,7 +112,6 @@ class MarketAnalyzer:
         self, features: pd.DataFrame, higher_features: Optional[Dict]
     ) -> float:
         """计算趋势强度（阶段 2-3 实现）."""
-        # TODO: 基于 ADX + EMA slope + MACD
         latest = features.iloc[-1]
 
         # 简单实现：基于 EMA 快慢线距离
@@ -130,7 +129,6 @@ class MarketAnalyzer:
 
     def _calculate_momentum(self, features: pd.DataFrame) -> float:
         """计算动量评分（阶段 2 实现）."""
-        # TODO: 基于 RSI + Stochastic + 成交量
         latest = features.iloc[-1]
 
         # 简单实现：基于 RSI
@@ -150,7 +148,6 @@ class MarketAnalyzer:
         self, features: pd.DataFrame
     ) -> tuple[List[float], List[float]]:
         """识别支撑/阻力位（阶段 3 实现）."""
-        # TODO: 基于 pivot 高低点
         return [], []
 
     def _identify_risks(
