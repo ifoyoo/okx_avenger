@@ -8,3 +8,4 @@ data/auto_watchlist.json
 data/perf_cache.json
 .ace-tool/
 okx_backup_*/
+.worktrees/
