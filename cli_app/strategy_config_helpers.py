@@ -82,13 +82,25 @@ def _save_weight_config(weights: Dict[str, float], names: Sequence[str]) -> str:
     return value
 
 
-def _print_strategies(settings: AppSettings, *, enabled_only: bool = False) -> None:
-    manager = build_signal_plugin_manager(settings)
-    rows = manager.status_rows()
-    print("=== Strategies ===")
-    print(f"{'name':<24} {'enabled':<8} {'weight':<8}")
-    print("-" * 44)
+def _format_strategy_lines(
+    rows: Sequence[Tuple[str, bool, float]],
+    *,
+    enabled_only: bool = False,
+) -> List[str]:
+    lines = [
+        "=== Strategies ===",
+        f"{'name':<24} {'enabled':<8} {'weight':<8}",
+        "-" * 44,
+    ]
     for name, enabled, weight in rows:
         if enabled_only and not enabled:
             continue
-        print(f"{name:<24} {('yes' if enabled else 'no'):<8} {weight:<8.2f}")
+        lines.append(f"{name:<24} {('yes' if enabled else 'no'):<8} {weight:<8.2f}")
+    return lines
+
+
+def _print_strategies(settings: AppSettings, *, enabled_only: bool = False) -> None:
+    manager = build_signal_plugin_manager(settings)
+    rows = manager.status_rows()
+    for line in _format_strategy_lines(rows, enabled_only=enabled_only):
+        print(line)

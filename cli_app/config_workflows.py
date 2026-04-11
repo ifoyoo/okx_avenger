@@ -4,26 +4,13 @@ import argparse
 
 from config.settings import dump_config_snapshot, get_settings
 
+from cli_app.config_reporting import format_config_summary_lines
 from cli_app.context import build_runtime
 
 
 def _print_config_summary(settings) -> None:
-    print("✅ 本地配置字段完整。")
-    print(f"- base_url: {settings.account.okx_base_url}")
-    print(f"- watchlist_mode: {settings.runtime.watchlist_mode}")
-    print(f"- run_interval_minutes: {settings.runtime.run_interval_minutes}")
-    print(f"- default_leverage: {settings.strategy.default_leverage}")
-    print(f"- llm_enabled: {settings.llm.enabled}")
-    if settings.llm.enabled:
-        print(f"- llm_model: {settings.llm.model}")
-        print(f"- llm_api_base: {settings.llm.api_base}")
-    print(f"- news_enabled: {settings.intel.news_enabled}")
-    if settings.intel.news_enabled:
-        print(f"- news_provider: {settings.intel.news_provider}")
-        print(f"- news_providers: {settings.intel.news_providers or settings.intel.news_provider}")
-        print(f"- news_api_base: {settings.intel.news_api_base}")
-        print(f"- coingecko_api_base: {settings.intel.coingecko_api_base}")
-        print(f"- coingecko_api_key_set: {bool(settings.intel.coingecko_api_key)}")
+    for line in format_config_summary_lines(settings):
+        print(line)
 
 
 def _print_snapshot_result(settings) -> None:
