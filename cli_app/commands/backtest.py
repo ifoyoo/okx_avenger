@@ -24,7 +24,7 @@ from cli_app.backtest_helpers import (
     _scores_to_weights,
 )
 from cli_app.runtime_helpers import DEFAULT_TIMEFRAME, _resolve_entries, _safe_account_snapshot
-from cli_app.commands.strategies import (
+from cli_app.strategy_config_helpers import (
     _print_strategies,
     _refresh_settings_cache,
     _save_weight_config,
