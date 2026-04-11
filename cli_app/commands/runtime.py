@@ -11,15 +11,19 @@ from loguru import logger
 from cli_app.context import RuntimeBundle, build_runtime
 from cli_app.runtime_helpers import (
     DEFAULT_HIGHER_TIMEFRAMES,
-    DEFAULT_LIMIT,
     DEFAULT_TIMEFRAME,
     _fmt_action,
     _fmt_plan,
-    _human_ratio,
     _read_runtime_heartbeat,
     _resolve_entries,
     _safe_account_snapshot,
     _write_runtime_heartbeat,
+)
+from cli_app.runtime_status_helpers import (
+    _format_account_lines,
+    _format_heartbeat_lines,
+    _format_position_lines,
+    _format_watchlist_lines,
 )
 from core.engine.execution import ExecutionPlan
 from core.models import TradeSignal
@@ -154,23 +158,14 @@ def cmd_status(_: argparse.Namespace) -> int:
     bundle = build_runtime()
     try:
         account_snapshot = _safe_account_snapshot(bundle.engine)
-        equity = float(account_snapshot.get("equity") or 0.0)
-        available = float(account_snapshot.get("available") or 0.0)
         print("=== Account ===")
-        print(f"equity   : {equity:.4f} USD")
-        print(f"available: {available:.4f} USD")
-        print(f"avail_pct: {_human_ratio(available, equity)}")
+        for row in _format_account_lines(account_snapshot):
+            print(row)
 
         print("\n=== Watchlist ===")
         entries = bundle.watchlist_manager.get_watchlist(account_snapshot)
-        if not entries:
-            print("(empty)")
-        else:
-            for idx, item in enumerate(entries, start=1):
-                inst = item.get("inst_id")
-                tf = item.get("timeframe", DEFAULT_TIMEFRAME)
-                higher = ",".join(item.get("higher_timeframes") or DEFAULT_HIGHER_TIMEFRAMES)
-                print(f"{idx:>2}. {inst:<20} tf={tf:<4} higher={higher}")
+        for row in _format_watchlist_lines(entries):
+            print(row)
 
         print("\n=== Position ===")
         try:
@@ -181,35 +176,13 @@ def cmd_status(_: argparse.Namespace) -> int:
         if not positions:
             print("(no positions)")
         else:
-            active = []
-            for p in positions:
-                size = str(p.get("pos") or "0")
-                if size in ("0", "0.0", "0.00"):
-                    continue
-                active.append(p)
-            if not active:
-                print("(no active positions)")
-            else:
-                for p in active:
-                    inst = p.get("instId", "-")
-                    side = p.get("posSide") or p.get("side") or "-"
-                    pos = p.get("pos", "-")
-                    upl = p.get("upl", "-")
-                    print(f"- {inst:<20} side={side:<5} pos={pos:<12} upl={upl}")
+            for row in _format_position_lines(positions):
+                print(row)
         heartbeat_path = Path(bundle.settings.runtime.runtime_heartbeat_path)
         heartbeat = _read_runtime_heartbeat(heartbeat_path)
         print("\n=== Runtime Heartbeat ===")
-        if not heartbeat:
-            print("(no heartbeat)")
-        else:
-            print(f"path      : {heartbeat_path}")
-            print(f"updated_at: {heartbeat.get('updated_at', '-')}")
-            print(f"status    : {heartbeat.get('status', '-')}")
-            print(f"cycle     : {heartbeat.get('cycle', '-')}")
-            print(f"exit_code : {heartbeat.get('exit_code', '-')}")
-            detail = str(heartbeat.get("detail", "") or "").strip()
-            if detail:
-                print(f"detail    : {detail}")
+        for row in _format_heartbeat_lines(heartbeat_path, heartbeat):
+            print(row)
         return 0
     finally:
         bundle.close()
