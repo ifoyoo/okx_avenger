@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
+import uuid
 
 from loguru import logger
 
@@ -46,6 +48,7 @@ class ExecutionPlan:
     block_reason: Optional[str] = None
     protection: Optional[TradeProtection] = None
     latest_price: Optional[float] = None
+    cl_ord_id: Optional[str] = None
 
 
 @dataclass
@@ -60,9 +63,17 @@ class ExecutionReport:
 class ExecutionEngine:
     """负责构建执行计划并调用 OKX 下单."""
 
-    def __init__(self, okx_client: OKXClient, max_slippage_pct: float = MAX_SLIPPAGE_PCT) -> None:
+    def __init__(
+        self,
+        okx_client: OKXClient,
+        max_slippage_pct: float = MAX_SLIPPAGE_PCT,
+        pending_timeout_seconds: float = 0.0,
+        reconcile_position: bool = True,
+    ) -> None:
         self.okx = okx_client
         self.max_slippage_pct = max_slippage_pct
+        self.pending_timeout_seconds = max(0.0, float(pending_timeout_seconds or 0.0))
+        self.reconcile_position = bool(reconcile_position)
         self._instrument_cache: Dict[str, InstrumentMeta] = {}
         self._loaded_inst_types: Set[str] = set()
 
@@ -74,6 +85,7 @@ class ExecutionEngine:
         pos_side: Optional[str],
         latest_price: float,
         atr: float,
+        trace_id: Optional[str] = None,
     ) -> ExecutionPlan:
         notes = []
         est_slippage = (atr / latest_price) if latest_price > 0 and atr > 0 else 0.0
@@ -118,6 +130,13 @@ class ExecutionEngine:
             notes.append("附带止盈/止损保护。")
         if min_contract_note and not blocked:
             notes.append(min_contract_note)
+        cl_ord_id = None
+        if signal.action != SignalAction.HOLD and signal.size > 0 and not blocked:
+            cl_ord_id = self._build_cl_ord_id(
+                inst_id=inst_id,
+                action=signal.action,
+                trace_id=trace_id,
+            )
         return ExecutionPlan(
             inst_id=inst_id,
             action=signal.action,
@@ -132,6 +151,7 @@ class ExecutionEngine:
             block_reason=block_reason,
             protection=signal.protection if not blocked else None,
             latest_price=latest_price,
+            cl_ord_id=cl_ord_id,
         )
 
     def execute(self, plan: ExecutionPlan) -> ExecutionReport:
@@ -139,6 +159,11 @@ class ExecutionEngine:
             reason = plan.block_reason or "执行计划被拦截。"
             logger.info(f"Execution plan blocked inst={plan.inst_id} reason={reason}")
             return ExecutionReport(plan=plan, success=False, error=reason)
+        cl_ord_id = plan.cl_ord_id or self._build_cl_ord_id(
+            inst_id=plan.inst_id,
+            action=plan.action,
+            trace_id=None,
+        )
         order_size = self._normalize_order_size(plan.size, plan.inst_id, plan.latest_price)
         price_text = self._format_price(plan.price) if plan.order_type == "limit" else None
         attach_algo_orders = self._build_attach_algo_orders(plan.protection)
@@ -159,6 +184,7 @@ class ExecutionEngine:
                 ord_type=plan.order_type,
                 sz=order_size,
                 px=price_text,
+                cl_ord_id=cl_ord_id,
                 pos_side=plan.pos_side,
                 attach_algo_ords=attach_algo_orders,
             )
@@ -180,7 +206,44 @@ class ExecutionEngine:
                 error=str(error_info.get("message") or ""),
                 code=str(error_info.get("code") or ""),
             )
+        if self.reconcile_position and plan.action in {SignalAction.BUY, SignalAction.SELL}:
+            if not self._has_effective_position(plan.inst_id):
+                if self.pending_timeout_seconds > 0:
+                    time.sleep(self.pending_timeout_seconds)
+                if not self._has_effective_position(plan.inst_id):
+                    return ExecutionReport(
+                        plan=plan,
+                        success=False,
+                        response=resp,
+                        error="订单成交超时：未观察到持仓变化。",
+                        code="PENDING_TIMEOUT",
+                    )
         return ExecutionReport(plan=plan, success=True, response=resp)
+
+    def _has_effective_position(self, inst_id: str) -> bool:
+        if not hasattr(self.okx, "get_positions"):
+            return True
+        try:
+            payload = self.okx.get_positions(inst_type="SWAP")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("持仓对账失败 inst_id={} err={}", inst_id, exc)
+            return True
+        data = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(data, list):
+            return True
+        inst_key = str(inst_id or "").upper()
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("instId") or "").upper() != inst_key:
+                continue
+            try:
+                size = abs(float(entry.get("pos") or 0.0))
+            except (TypeError, ValueError):
+                size = 0.0
+            if size > 0:
+                return True
+        return False
 
     def _normalize_order_size(self, size: float, inst_id: str, latest_price: Optional[float]) -> str:
         meta = self._get_instrument_meta(inst_id)
@@ -221,6 +284,15 @@ class ExecutionEngine:
     def _format_number(self, value: float) -> str:
         text = f"{value:.8f}".rstrip("0").rstrip(".")
         return text or "0"
+
+    @staticmethod
+    def _build_cl_ord_id(inst_id: str, action: SignalAction, trace_id: Optional[str]) -> str:
+        inst_token = "".join(ch for ch in inst_id.upper() if ch.isalnum())[:10].lower()
+        action_token = action.value[:1].lower() if action.value else "h"
+        trace_token = "".join(ch for ch in (trace_id or "").lower() if ch.isalnum())[:8]
+        nonce = uuid.uuid4().hex[:10]
+        raw = f"cx{action_token}{inst_token}{trace_token}{nonce}"
+        return raw[:32]
 
     def _build_attach_algo_orders(
         self, protection: Optional[TradeProtection]

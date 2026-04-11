@@ -87,6 +87,14 @@ class PerformanceTracker:
         fees: List[float] = [self._to_float(item.get("fee")) for item in filtered]
         wins = [p for p in pnls if p > 0]
         losses = [p for p in pnls if p < 0]
+        ordered = sorted(filtered, key=lambda item: self._extract_ts(item), reverse=True)
+        consecutive_losses = 0
+        for item in ordered:
+            pnl = self._to_float(item.get("fillPnl") or item.get("pnl"))
+            if pnl < 0:
+                consecutive_losses += 1
+                continue
+            break
         total_pnl = sum(pnls)
         total_fee = sum(fees)
         win_rate = 0.0
@@ -98,6 +106,7 @@ class PerformanceTracker:
             "sample_count": len(filtered),
             "wins": len(wins),
             "losses": len(losses),
+            "consecutive_losses": consecutive_losses,
             "win_rate": win_rate,
             "total_pnl": total_pnl,
             "avg_win": sum(wins) / len(wins) if wins else 0.0,

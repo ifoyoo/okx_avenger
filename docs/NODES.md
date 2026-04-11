@@ -1,7 +1,7 @@
 # OKX 自动交易项目节点清单（执行链路版）
 
 > 目标：把当前项目拆成可独立优化的节点，逐个做“输入-输出-约束-优化”。
->  
+>
 > 范围：`okx run/once` 实盘链路；`backtest`/`strategies` 作为辅助链路。
 
 ---
@@ -9,7 +9,7 @@
 ## 0. 总览（主链路）
 
 ```text
-CLI(cli.py/okx) 
+CLI(cli.py/okx)
   -> Config(.env -> settings)
   -> Watchlist(manual/auto/mixed)
   -> Data(REST/WS -> candles/features/snapshot)
@@ -20,7 +20,7 @@ CLI(cli.py/okx)
   -> Monitor/Log/Notify/Perf
 ```
 
-`./okx strategies` and `./okx backtest` are treated as auxiliary CLI paths that live outside the primary live runtime chain (observability/tuning helpers and offline validation, respectively).
+`./okx strategies` 与 `./okx backtest` 视为主实盘运行链路之外的辅助 CLI 路径，分别用于观测/调优辅助与离线验证。
 
 ---
 
@@ -303,11 +303,11 @@ CLI(cli.py/okx)
 
 每次只选 **1 个节点**，按固定模板推进：
 
-1) 先定义节点目标（成功判据）  
-2) 写最小变更  
-3) 增加对应测试  
-4) dry-run 验证  
-5) 完成后更新 `docs/SESSION_STATE.md`、`docs/DECISIONS.md`、`docs/NEXT_STEP.md`  
+1) 先定义节点目标（成功判据）
+2) 写最小变更
+3) 增加对应测试
+4) dry-run 验证
+5) 完成后更新 `docs/SESSION_STATE.md`、`docs/DECISIONS.md`、`docs/NEXT_STEP.md`
 6) 再进入下一个节点
 
 这样可以避免“大改后不可控”。

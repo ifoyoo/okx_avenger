@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import cli
 
 
 def test_cli_main_dispatches_selected_handler(monkeypatch) -> None:
-    calls: list[str] = []
+    parser = argparse.ArgumentParser()
+    parser.set_defaults(command="status")
 
     def fake_status(args) -> int:
-        calls.append(args.command)
+        assert args.command == "status"
         return 17
 
-    monkeypatch.setattr(cli, "cmd_status", fake_status)
+    parser.set_defaults(func=fake_status)
+    monkeypatch.setattr(cli, "build_parser", lambda: parser)
 
-    assert cli.main(["status"]) == 17
-    assert calls == ["status"]
+    assert cli.main([]) == 17
 
 
 def test_okx_launcher_targets_cli_py() -> None:

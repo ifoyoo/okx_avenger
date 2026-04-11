@@ -35,9 +35,19 @@ class AutoWatchlistBuilder:
         self.cache_path = Path(runtime_settings.auto_watchlist_cache)
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.timeframe = (runtime_settings.auto_watchlist_timeframe or "5m").strip() or "5m"
-        higher_raw = runtime_settings.auto_watchlist_higher_timeframes or "15m,1H"
+        higher_raw = runtime_settings.auto_watchlist_higher_timeframes or "1H"
         higher_parts = [part.strip() for part in higher_raw.split(",") if part.strip()]
-        self.higher_timeframes: Tuple[str, ...] = tuple(higher_parts or ("15m", "1H"))
+        self.higher_timeframes: Tuple[str, ...] = tuple(higher_parts or ("1H",))
+        self.max_spread_ratio = max(0.0, float(getattr(runtime_settings, "auto_watchlist_max_spread_ratio", 0.003)))
+        self.max_range_ratio_24h = max(
+            0.0,
+            float(getattr(runtime_settings, "auto_watchlist_max_range_ratio_24h", 0.18)),
+        )
+        self.min_notional_24h = max(
+            0.0,
+            float(getattr(runtime_settings, "auto_watchlist_min_notional_24h", 5_000_000.0)),
+        )
+        self.max_same_base = max(1, int(getattr(runtime_settings, "auto_watchlist_max_same_base", 1) or 1))
         self._balance_ratio = max(0.0, float(strategy_settings.balance_usage_ratio))
         leverage = getattr(strategy_settings, "default_leverage", 1.0)
         try:
@@ -109,10 +119,15 @@ class AutoWatchlistBuilder:
             return []
         instruments = self._fetch_instruments()
         entries: List[Dict[str, Any]] = []
+        base_counter: Dict[str, int] = {}
         skipped_due_to_funds = 0
         for ticker in ticker_data:
             inst_id = ticker.get("instId")
             if not inst_id or not inst_id.upper().endswith("-USDT-SWAP"):
+                continue
+            quality_ok, quality_reason = self._passes_market_quality(ticker)
+            if not quality_ok:
+                logger.debug("自动 watchlist 过滤 {}: {}", inst_id, quality_reason)
                 continue
             meta = instruments.get(inst_id.upper())
             if not meta:
@@ -127,7 +142,12 @@ class AutoWatchlistBuilder:
             if min_notional > max_affordable + 1e-12:
                 skipped_due_to_funds += 1
                 continue
+            base_key = _canonical_base_key(inst_id)
+            if base_counter.get(base_key, 0) >= self.max_same_base:
+                logger.debug("自动 watchlist 过滤 {}: base={} 超过上限 {}", inst_id, base_key, self.max_same_base)
+                continue
             entries.append(self._build_entry(inst_id))
+            base_counter[base_key] = base_counter.get(base_key, 0) + 1
             if len(entries) >= self.target_size:
                 break
         if not entries and skipped_due_to_funds:
@@ -139,6 +159,29 @@ class AutoWatchlistBuilder:
                 f"自动 watchlist：满足资金条件的合约仅 {len(entries)} 个，未达到设定数量 {self.target_size}。"
             )
         return entries
+
+    def _passes_market_quality(self, ticker: Dict[str, Any]) -> Tuple[bool, str]:
+        inst_id = str(ticker.get("instId") or "-")
+        last_px = _to_float(ticker.get("last")) or _to_float(ticker.get("px"))
+        if last_px <= 0:
+            return False, f"{inst_id} 缺少有效 last/px"
+        bid = _to_float(ticker.get("bidPx"))
+        ask = _to_float(ticker.get("askPx"))
+        if bid > 0 and ask > 0 and ask >= bid:
+            mid = (ask + bid) * 0.5
+            spread_ratio = (ask - bid) / max(1e-12, mid)
+            if self.max_spread_ratio > 0 and spread_ratio > self.max_spread_ratio:
+                return False, f"点差 {spread_ratio:.2%} > 上限 {self.max_spread_ratio:.2%}"
+        high_24h = _to_float(ticker.get("high24h"))
+        low_24h = _to_float(ticker.get("low24h"))
+        if high_24h > 0 and low_24h > 0 and high_24h >= low_24h:
+            range_ratio = (high_24h - low_24h) / max(1e-12, last_px)
+            if self.max_range_ratio_24h > 0 and range_ratio > self.max_range_ratio_24h:
+                return False, f"24h 波动 {range_ratio:.2%} > 上限 {self.max_range_ratio_24h:.2%}"
+        vol_notional = _to_float(ticker.get("volCcy24h"))
+        if self.min_notional_24h > 0 and vol_notional < self.min_notional_24h:
+            return False, f"24h 成交额 {vol_notional:.0f} < 下限 {self.min_notional_24h:.0f}"
+        return True, "ok"
 
     def _fetch_account_snapshot(self) -> Dict[str, float]:
         try:
@@ -227,6 +270,12 @@ def _to_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _canonical_base_key(inst_id: str) -> str:
+    symbol = str(inst_id or "").split("-")[0].upper()
+    trimmed = symbol.lstrip("0123456789")
+    return trimmed or symbol
 
 
 __all__ = ["AutoWatchlistBuilder"]

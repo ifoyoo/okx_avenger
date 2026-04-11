@@ -1,9 +1,15 @@
 __pycache__/
 *.pyc
+.DS_Store
+.pytest_cache/
+.venv/
 .env
 logs/
 *.log
 data/auto_watchlist.json
+data/config_snapshot.json
+data/runtime_heartbeat.json
+data/backtests/
 .okx-cache/
 data/perf_cache.json
 .ace-tool/

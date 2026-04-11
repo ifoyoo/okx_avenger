@@ -189,6 +189,24 @@ class TestMarketAnalyzer:
         assert isinstance(result.resistance_levels, list)
         assert isinstance(result.risk_factors, list)
 
+    def test_support_resistance_detection(self, analyzer, sample_features):
+        df = sample_features.copy()
+        for idx in range(len(df)):
+            wave = ((idx % 20) - 10) * 0.3
+            center = 100 + wave
+            df.loc[idx, "open"] = center - 0.1
+            df.loc[idx, "high"] = center + 0.6
+            df.loc[idx, "low"] = center - 0.6
+            df.loc[idx, "close"] = center
+        result = analyzer.analyze(
+            inst_id="BTC-USDT-SWAP",
+            timeframe="5m",
+            features=df,
+        )
+        assert len(result.support_levels) >= 1
+        assert len(result.resistance_levels) >= 1
+        assert "支撑位" in result.text or "阻力位" in result.text
+
 
 if __name__ == "__main__":
     # 运行测试

@@ -33,9 +33,10 @@ class DecisionRecord:
     analysis_reason: str
     strategy_action: str
     close_price: float
+    trace_id: Optional[str] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "inst_id": self.inst_id,
             "timeframe": self.timeframe,
             "timestamp": self.timestamp,
@@ -45,6 +46,9 @@ class DecisionRecord:
             "strategy_action": self.strategy_action,
             "close_price": self.close_price,
         }
+        if self.trace_id:
+            payload["trace_id"] = self.trace_id
+        return payload
 
     def to_json(self) -> str:
         return json.dumps(self.as_dict(), ensure_ascii=False)

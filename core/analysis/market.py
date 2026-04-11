@@ -148,7 +148,74 @@ class MarketAnalyzer:
         self, features: pd.DataFrame
     ) -> tuple[List[float], List[float]]:
         """识别支撑/阻力位（阶段 3 实现）."""
-        return [], []
+        if features is None or len(features) < 12:
+            return [], []
+        lows = features["low"].astype(float).tolist()
+        highs = features["high"].astype(float).tolist()
+        close = float(features.iloc[-1].get("close", 0.0) or 0.0)
+        if close <= 0:
+            return [], []
+
+        local_lows: List[float] = []
+        local_highs: List[float] = []
+        lookback = min(len(features), 200)
+        start = max(2, len(features) - lookback)
+        end = len(features) - 2
+        for idx in range(start, end):
+            low_window = lows[idx - 2: idx + 3]
+            high_window = highs[idx - 2: idx + 3]
+            center_low = lows[idx]
+            center_high = highs[idx]
+            if low_window and center_low <= min(low_window):
+                local_lows.append(center_low)
+            if high_window and center_high >= max(high_window):
+                local_highs.append(center_high)
+
+        tolerance = max(0.0015, min(0.02, float(features["close"].pct_change().abs().tail(40).mean() or 0.003) * 1.8))
+        supports = self._cluster_levels(
+            [value for value in local_lows if value < close],
+            current_price=close,
+            tolerance_ratio=tolerance,
+            top_n=3,
+            reverse=True,
+        )
+        resistances = self._cluster_levels(
+            [value for value in local_highs if value > close],
+            current_price=close,
+            tolerance_ratio=tolerance,
+            top_n=3,
+            reverse=False,
+        )
+        return supports, resistances
+
+    @staticmethod
+    def _cluster_levels(
+        levels: List[float],
+        *,
+        current_price: float,
+        tolerance_ratio: float,
+        top_n: int,
+        reverse: bool,
+    ) -> List[float]:
+        if not levels:
+            return []
+        ordered = sorted(levels, reverse=reverse)
+        clusters: List[List[float]] = []
+        for level in ordered:
+            if level <= 0:
+                continue
+            matched = False
+            for cluster in clusters:
+                pivot = sum(cluster) / len(cluster)
+                if abs(level - pivot) / max(current_price, 1e-12) <= tolerance_ratio:
+                    cluster.append(level)
+                    matched = True
+                    break
+            if not matched:
+                clusters.append([level])
+        merged = [sum(cluster) / len(cluster) for cluster in clusters]
+        merged = sorted(merged, reverse=reverse)
+        return [round(item, 6) for item in merged[: max(1, top_n)]]
 
     def _identify_risks(
         self,
@@ -318,6 +385,10 @@ class MarketAnalyzer:
         volume = latest.get("volume", 0)
         mfi = latest.get("mfi", 50)
         sections.append(f"**成交量**：{volume:.2f}，MFI: {mfi:.1f}")
+        if support:
+            sections.append("**支撑位**：" + " / ".join(f"{item:.4f}" for item in support))
+        if resistance:
+            sections.append("**阻力位**：" + " / ".join(f"{item:.4f}" for item in resistance))
 
         # 账户信息
         if account_snapshot:

@@ -116,6 +116,8 @@ BALANCE_USAGE_RATIO=0.7
 DEFAULT_LEVERAGE=3
 DEFAULT_TAKE_PROFIT_PCT=0.35   ; 0.35=+35%，止损同理
 DEFAULT_STOP_LOSS_PCT=0.2
+STRATEGY_SIGNALS_ENABLED=all   ; all 或逗号列表，如 bull_trend,ma_golden_cross,volume_breakout
+STRATEGY_SIGNAL_WEIGHTS=        ; 形如 bull_trend=1.1,box_oscillation=0.8
 RUN_INTERVAL_MINUTES=5
 DEFAULT_MAX_POSITION=0.002
 FEATURE_LIMIT=150
@@ -126,7 +128,7 @@ AUTO_WATCHLIST_TOP_N=10
 AUTO_WATCHLIST_REFRESH_HOURS=24
 AUTO_WATCHLIST_CACHE=data/auto_watchlist.json
 AUTO_WATCHLIST_TIMEFRAME=5m
-AUTO_WATCHLIST_HIGHER_TIMEFRAMES=15m,1H
+AUTO_WATCHLIST_HIGHER_TIMEFRAMES=1H
 
 # ---- Notification ----
 NOTIFY_ENABLED=false
@@ -135,6 +137,33 @@ NOTIFY_COOLDOWN_SECONDS=600
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 TELEGRAM_API_URL=https://api.telegram.org
+
+# ---- LLM Brain (Optional) ----
+LLM_ENABLED=false
+LLM_PROVIDER=openai_compatible
+LLM_API_BASE=https://api.openai.com/v1
+LLM_API_KEY=
+LLM_MODEL=gpt-4o-mini
+LLM_TIMEOUT_SECONDS=8
+LLM_TEMPERATURE=0.1
+LLM_MAX_TOKENS=320
+
+# ---- News / Sentiment Intel (Optional) ----
+NEWS_ENABLED=false
+NEWS_PROVIDER=newsapi
+NEWS_PROVIDERS=coingecko,newsapi
+NEWS_API_BASE=https://newsapi.org/v2/everything
+NEWS_API_KEY=
+NEWS_TIMEOUT_SECONDS=6
+NEWS_LIMIT=10
+NEWS_WINDOW_HOURS=24
+SENTIMENT_ENABLED=true
+NEWS_SYMBOL_ALIASES=
+NEWS_COIN_IDS=
+COINGECKO_API_BASE=https://pro-api.coingecko.com/api/v3
+COINGECKO_API_KEY=
+COINGECKO_NEWS_LANGUAGE=en
+COINGECKO_NEWS_TYPE=news
 ```
 
 ### 3. 启动
@@ -152,6 +181,49 @@ python main.py
 
 > **Dry Run**：`main.py` 中 `DRY_RUN = False`，若需仿真可切换为 `True`（仍会计算信号但不会下单）。
 
+### 3.1 推荐：简洁 CLI（无交互启动）
+
+```bash
+# 执行一轮（按 watchlist）
+./okx once --dry-run
+
+# 只跑单一标的
+./okx once --inst BTC-USDT-SWAP --timeframe 5m --higher-timeframes 1H --dry-run
+
+# 常驻循环（默认读取 RUN_INTERVAL_MINUTES）
+./okx run
+
+# 查看账户/持仓/watchlist
+./okx status
+
+# 查看策略开关与权重
+./okx strategies list
+./okx strategies enable bull_trend ma_golden_cross
+./okx strategies disable box_oscillation
+./okx strategies set-weight bull_trend 1.20
+./okx strategies reset-weight bull_trend
+./okx strategies clear-weights
+
+# 配置检查（可选 API 连通性）
+./okx config-check --api-check
+
+# 快速回测
+./okx backtest run --inst BTC-USDT-SWAP --timeframe 5m --limit 800 --warmup 120
+./okx backtest report
+
+# 基于回测推荐策略权重（预览 / 应用）
+./okx backtest tune --inst BTC-USDT-SWAP --timeframe 5m --limit 800
+./okx backtest tune --inst BTC-USDT-SWAP --timeframe 5m --limit 800 --apply
+```
+
+如果你希望在任意目录直接使用 `okx run`（不加 `./`），可把项目目录加入 `PATH`，或做软链：
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$PWD/okx" ~/.local/bin/okx
+# 确保 ~/.local/bin 在 PATH 中
+```
+
 ### 4. 停止与日志
 
 按 `Ctrl + C` 触发 `KeyboardInterrupt`，线程池与 WebSocket 会在 `finally` 中优雅关闭。运行日志默认写入 `LOG_DIR/runtime-*.log`。
@@ -166,15 +238,19 @@ python main.py
 
 ```json
 [
+  "BTC-USDT-SWAP",
+  "ETH-USDT-SWAP"
+]
+```
+
+也支持在少数特殊标的上使用对象覆盖默认值：
+
+```json
+[
+  "BTC-USDT-SWAP",
   {
-    "inst_id": "BTC-USDT-SWAP",
-    "timeframe": "5m",
-    "higher_timeframes": ["15m", "1H", "4H"],
-    "max_position": 0.003,
-    "protection": {
-      "take_profit": {"mode": "percent", "value": 0.4},
-      "stop_loss": {"mode": "atr", "value": 1.8}
-    }
+    "inst_id": "ETH-USDT-SWAP",
+    "higher_timeframes": ["4H"]
   }
 ]
 ```
@@ -182,8 +258,8 @@ python main.py
 字段说明：
 
 - `inst_id`：OKX 合约 ID，推荐 `*-USDT-SWAP` 永续。
-- `timeframe`：基础周期（如 `5m`、`15m`）；多周期会自动半截历史长度。
-- `higher_timeframes`：tuple/list/字符串（`,` 分隔），用于趋势/波动判定。
+- `timeframe`：可选，默认 `5m`；只有特殊标的才建议覆盖。
+- `higher_timeframes`：可选，默认 `1H`；用于趋势/波动判定。
 - `max_position`：单次信号允许的最大标的数量（基础值，之后会被资金+波动二次裁剪）。
 - `protection`：覆盖全局默认的止盈/止损设置，可指定 `mode=percent/price/atr`。
 
@@ -215,6 +291,8 @@ python main.py
 | --- | --- | --- |
 | 行情采集 | `core/data/features.py`, `core/client/stream.py`, `core/data/snapshot.py` | REST/WebSocket K 线写入 Pandas，生成 RSI/EMA/MACD/ATR/布林/returns。盘口深度、成交、资金费率、持仓量并行采集并转换成易读文本。 |
 | 市场分析 | `core/analysis/market.py` | 基于技术指标和结构进行确定性分析，计算趋势强度、动量评分、识别支撑/阻力位和风险因素，生成结构化分析文本。 |
+| 新闻/舆情情报（可选） | `core/analysis/intel.py` | 当 `NEWS_ENABLED=true` 时拉取新闻，进行去重、关键词风险标注与情绪打分（确定性预处理），输出 `sentiment_score/risk_tags/headlines` 供 LLM 与策略参考。 |
+| LLM 分析大脑（可选） | `core/analysis/llm_brain.py` | 当 `LLM_ENABLED=true` 时调用 OpenAI 兼容接口输出结构化观点（`action/confidence/risk/invalid_conditions`），仅参与融合，不直接下单；超时/失败自动回退确定性分析。 |
 | 策略融合 | `core/strategy/core.py` | - Objective signals：RSI/EMA/MACD/Bollinger 多条件给出 buy/sell/hold + 置信度<br>- Higher timeframe bias：多周期趋势投票<br>- AnalysisInterpreter：解析市场分析结果<br>- SignalFusion：客观信号 + 市场分析加权决策<br>- Liquidity/volatility/风险文本 → NOTE<br>- PositionSizer (`core/strategy/positioning.py`) 按置信度、ATR、账户权益/可用资金动态 sizing，附带 ATR/百分比止盈止损。 |
 | 风控层 | `core/engine/risk.py` | - 账户层：交易所风控标志、可用资金占比<br>- 品种层：成交量不足、近期波动超阈值、风险提示<br>- 信号层：多周期方向冲突 → 直接 HOLD，并把原因拼入 `TradeSignal.reason`。 |
 | 执行层 | `core/engine/execution.py` | - OKX instruments 缓存合约规格；自动折算 underlying ↔ contracts<br>- 根据 ATR/价格估计滑点，0.01 内 + 高置信使用限价单减少冲击<br>- 提前判定最小张数/最小下单不满足时抬升或阻断<br>- 构造 `attachAlgoOrds` 添加止盈止损。 |

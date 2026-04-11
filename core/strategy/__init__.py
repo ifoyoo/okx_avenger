@@ -8,6 +8,11 @@ from .core import (
     StrategyOutput,
 )
 from .positioning import PositionSizer, PositionSizerConfig
+from .plugins import (
+    SignalPluginDefinition,
+    SignalPluginManager,
+    build_signal_plugin_manager,
+)
 
 __all__ = [
     "AnalysisView",
@@ -15,6 +20,9 @@ __all__ = [
     "ObjectiveSignalGenerator",
     "PositionSizer",
     "PositionSizerConfig",
+    "SignalPluginDefinition",
+    "SignalPluginManager",
     "Strategy",
     "StrategyOutput",
+    "build_signal_plugin_manager",
 ]

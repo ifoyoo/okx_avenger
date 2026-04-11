@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+import uuid
 from typing import Any, Dict, List, Optional, Sequence, Type, TypeVar
 
 from loguru import logger
@@ -25,6 +27,8 @@ class OKXClient:
         self.account = self.settings.account
         self._base_url = self.account.okx_base_url.rstrip("/")
         self._flag = "0"
+        self._max_retries = max(0, int(getattr(self.account, "http_max_retries", 2) or 2))
+        self._retry_backoff = max(0.05, float(getattr(self.account, "http_retry_backoff_seconds", 0.4) or 0.4))
         proxies = self._build_proxies(self.account.http_proxy)
         self._market = self._create_api_client(market_api.Market, proxies)
         self._trade = self._create_api_client(trade_api.Trade, proxies)
@@ -63,47 +67,110 @@ class OKXClient:
         }
         return response
 
+    @staticmethod
+    def _classify_error_code(code: str) -> str:
+        text = str(code or "").strip()
+        if text in {"50100", "50101", "50113", "50114"}:
+            return "auth"
+        if text in {"50011", "50061"}:
+            return "rate_limit"
+        if text.startswith("500"):
+            return "transient"
+        if text in {"0", "200", ""}:
+            return "none"
+        return "business"
+
+    @staticmethod
+    def _classify_exception(exc: Exception) -> str:
+        text = str(exc or "").lower()
+        if "timeout" in text:
+            return "timeout"
+        if "connection" in text or "network" in text or "dns" in text:
+            return "network"
+        return "unknown"
+
+    def _request(self, name: str, fn, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        attempts = max(1, self._max_retries + 1)
+        last_exc: Optional[Exception] = None
+        for attempt in range(attempts):
+            attempt_no = attempt + 1
+            try:
+                response = fn(*args, **kwargs)
+            except Exception as exc:
+                last_exc = exc
+                category = self._classify_exception(exc)
+                if attempt_no < attempts:
+                    sleep_s = self._retry_backoff * (2 ** attempt)
+                    logger.warning(
+                        "event=okx_retry name={} attempt={}/{} category={} sleep_s={:.2f}",
+                        name,
+                        attempt_no,
+                        attempts,
+                        category,
+                        sleep_s,
+                    )
+                    time.sleep(sleep_s)
+                    continue
+                raise
+            normalized = self._ensure_success(response)
+            error = normalized.get("error")
+            if not isinstance(error, dict):
+                return normalized
+            code = str(error.get("code") or "")
+            category = self._classify_error_code(code)
+            normalized["error"]["category"] = category
+            if category in {"rate_limit", "transient"} and attempt_no < attempts:
+                sleep_s = self._retry_backoff * (2 ** attempt)
+                logger.warning(
+                    "event=okx_retry name={} attempt={}/{} code={} category={} sleep_s={:.2f}",
+                    name,
+                    attempt_no,
+                    attempts,
+                    code,
+                    category,
+                    sleep_s,
+                )
+                time.sleep(sleep_s)
+                continue
+            return normalized
+        if last_exc:
+            raise last_exc
+        return {"error": {"code": "UNKNOWN", "message": "request failed", "category": "unknown"}}
+
     def get_account_balance(self, ccy: Optional[str] = None) -> Dict[str, Any]:
         """查询账户余额."""
 
-        resp = self._account.get_balance(ccy=ccy or "")
-        return self._ensure_success(resp)
+        return self._request("account_balance", self._account.get_balance, ccy=ccy or "")
 
     def get_ticker(self, inst_id: str) -> Dict[str, Any]:
         """获取单个交易对行情."""
 
-        resp = self._market.get_ticker(instId=inst_id)
-        return self._ensure_success(resp)
+        return self._request("ticker", self._market.get_ticker, instId=inst_id)
 
     def get_tickers(self, inst_type: str = "SWAP") -> Dict[str, Any]:
         """批量获取某类合约的 tickers."""
 
-        resp = self._market.get_tickers(instType=inst_type)
-        return self._ensure_success(resp)
+        return self._request("tickers", self._market.get_tickers, instType=inst_type)
 
     def get_order_book(self, inst_id: str, depth: int = 5) -> Dict[str, Any]:
         """获取盘口深度."""
 
-        resp = self._market.get_books(instId=inst_id, sz=str(depth))
-        return self._ensure_success(resp)
+        return self._request("order_book", self._market.get_books, instId=inst_id, sz=str(depth))
 
     def get_trades(self, inst_id: str, limit: int = 20) -> Dict[str, Any]:
         """获取最近成交列表."""
 
-        resp = self._market.get_trades(instId=inst_id, limit=str(limit) if limit else "")
-        return self._ensure_success(resp)
+        return self._request("trades", self._market.get_trades, instId=inst_id, limit=str(limit) if limit else "")
 
     def get_funding_rate(self, inst_id: str) -> Dict[str, Any]:
         """获取永续合约资金费率."""
 
-        resp = self._public.get_funding_rate(instId=inst_id)
-        return self._ensure_success(resp)
+        return self._request("funding_rate", self._public.get_funding_rate, instId=inst_id)
 
     def get_open_interest(self, inst_id: str) -> Dict[str, Any]:
         """获取合约持仓量."""
 
-        resp = self._public.get_open_interest(instId=inst_id)
-        return self._ensure_success(resp)
+        return self._request("open_interest", self._public.get_open_interest, instId=inst_id)
 
     def get_candles(
         self,
@@ -115,14 +182,15 @@ class OKXClient:
     ) -> Dict[str, Any]:
         """K线数据."""
 
-        resp = self._market.get_candles(
+        return self._request(
+            "candles",
+            self._market.get_candles,
             instId=inst_id,
             bar=bar,
             after=after or "",
             before=before or "",
             limit=str(limit) if limit else "",
         )
-        return self._ensure_success(resp)
 
     def get_trade_fills(
         self,
@@ -134,14 +202,15 @@ class OKXClient:
     ) -> Dict[str, Any]:
         """获取近 3 天的成交明细."""
 
-        resp = self._trade.get_fills(
+        return self._request(
+            "trade_fills",
+            self._trade.get_fills,
             instType=inst_type or "",
             begin=begin or "",
             end=end or "",
             after=after or "",
             limit=str(limit),
         )
-        return self._ensure_success(resp)
 
     def get_trade_fills_history(
         self,
@@ -153,14 +222,15 @@ class OKXClient:
     ) -> Dict[str, Any]:
         """获取近 3 个月的成交明细."""
 
-        resp = self._trade.get_fills_history(
+        return self._request(
+            "trade_fills_history",
+            self._trade.get_fills_history,
             instType=inst_type,
             begin=begin or "",
             end=end or "",
             after=after or "",
             limit=str(limit),
         )
-        return self._ensure_success(resp)
 
     def place_order(
         self,
@@ -182,6 +252,9 @@ class OKXClient:
         reduce_only: bool = False,
     ) -> Dict[str, Any]:
         """下单，支持市价/限价."""
+        resolved_cl_ord_id = str(cl_ord_id or "").strip()
+        if not resolved_cl_ord_id:
+            resolved_cl_ord_id = f"auto{uuid.uuid4().hex[:24]}"
 
         payload: Dict[str, Any] = {
             "instId": inst_id,
@@ -190,7 +263,7 @@ class OKXClient:
             "ordType": ord_type,
             "sz": sz,
             "px": px or "",
-            "clOrdId": cl_ord_id or "",
+            "clOrdId": resolved_cl_ord_id,
             "posSide": pos_side or "",
             "tpTriggerPx": tp_trigger_px or "",
             "tpTriggerPxType": tp_trigger_px_type or "",
@@ -203,33 +276,36 @@ class OKXClient:
         if attach_algo_ords:
             payload["attachAlgoOrds"] = attach_algo_ords
         payload["proxy_host"] = getattr(self._trade, "proxy_host", None)
-        resp = self._trade.send_request(
+        return self._request(
+            "place_order",
+            self._trade.send_request,
             *trade_api._TradeEndpoints.set_order,
             **payload,
         )
-        return self._ensure_success(resp)
 
     def cancel_order(self, inst_id: str, ord_id: Optional[str] = None, cl_ord_id: Optional[str] = None) -> Dict[str, Any]:
         """撤单."""
 
-        resp = self._trade.set_cancel_order(instId=inst_id, ordId=ord_id or "", clOrdId=cl_ord_id or "")
-        return self._ensure_success(resp)
+        return self._request(
+            "cancel_order",
+            self._trade.set_cancel_order,
+            instId=inst_id,
+            ordId=ord_id or "",
+            clOrdId=cl_ord_id or "",
+        )
 
     def instruments(self, inst_type: str = "SWAP") -> Dict[str, Any]:
         """查询支持的合约或现货品种."""
 
-        resp = self._public.get_instruments(instType=inst_type)
-        return self._ensure_success(resp)
+        return self._request("instruments", self._public.get_instruments, instType=inst_type)
 
     def get_account_config(self) -> Dict[str, Any]:
         """查看账户配置."""
 
-        resp = self._account.get_config()
-        return self._ensure_success(resp)
+        return self._request("account_config", self._account.get_config)
 
     def get_positions(self, inst_type: str = "SWAP") -> Dict[str, Any]:
-        resp = self._account.get_positions(instType=inst_type)
-        return self._ensure_success(resp)
+        return self._request("positions", self._account.get_positions, instType=inst_type)
 
     def list_conditional_algos(self, inst_id: Optional[str] = None) -> List[Dict[str, Any]]:
         inst_type = self._infer_inst_type(inst_id) if inst_id else ""

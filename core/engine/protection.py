@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 from dataclasses import dataclass
-from typing import Dict, Optional, List
+from typing import Any, Dict, Optional, List
 
 from loguru import logger
 
@@ -28,12 +29,22 @@ class ProtectionMonitor:
         default_td_mode: str = "cross",
         cooldown_seconds: float = 30.0,
         interval_seconds: float = 15.0,
+        per_inst_thresholds: Optional[Dict[str, ProtectionThresholds | Dict[str, Any]]] = None,
     ) -> None:
         self.okx = okx_client
         self.thresholds = thresholds
         self.default_td_mode = (default_td_mode or "cross").lower() or "cross"
         self.cooldown_seconds = max(5.0, cooldown_seconds)
         self.interval_seconds = max(5.0, interval_seconds)
+        self.per_inst_thresholds: Dict[str, ProtectionThresholds] = {}
+        if isinstance(per_inst_thresholds, dict):
+            for inst_id, node in per_inst_thresholds.items():
+                normalized = self._normalize_threshold(node)
+                if not normalized:
+                    continue
+                key = str(inst_id or "").strip().upper()
+                if key:
+                    self.per_inst_thresholds[key] = normalized
         self._cooldown: Dict[str, float] = {}
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -77,6 +88,15 @@ class ProtectionMonitor:
             structured[inst] = list(entries.values())
         return structured
 
+    def set_inst_threshold(self, inst_id: str, threshold: ProtectionThresholds | Dict[str, Any]) -> None:
+        key = str(inst_id or "").strip().upper()
+        if not key:
+            return
+        normalized = self._normalize_threshold(threshold)
+        if not normalized:
+            return
+        self.per_inst_thresholds[key] = normalized
+
     def _evaluate_position(self, entry: Dict[str, str]) -> None:
         try:
             inst_id = str(entry.get("instId") or "").strip()
@@ -94,12 +114,13 @@ class ProtectionMonitor:
             profit_ratio = self._extract_profit_ratio(entry, avg_px, direction_sign)
             if profit_ratio is None:
                 return
+            thresholds = self._resolve_threshold(inst_id)
             key = f"{inst_id}:{direction_side}"
             now = time.time()
             if now - self._cooldown.get(key, 0.0) < self.cooldown_seconds:
                 return
             margin_mode = entry.get("mgnMode") or entry.get("marginMode")
-            if self.thresholds.take_profit_pct > 0 and profit_ratio >= self.thresholds.take_profit_pct:
+            if thresholds.take_profit_pct > 0 and profit_ratio >= thresholds.take_profit_pct:
                 self._close_position(
                     inst_id,
                     pos_side_raw,
@@ -110,7 +131,7 @@ class ProtectionMonitor:
                     profit_ratio,
                 )
                 self._cooldown[key] = now
-            elif self.thresholds.stop_loss_pct > 0 and profit_ratio <= -self.thresholds.stop_loss_pct:
+            elif thresholds.stop_loss_pct > 0 and profit_ratio <= -thresholds.stop_loss_pct:
                 self._close_position(
                     inst_id,
                     pos_side_raw,
@@ -123,6 +144,25 @@ class ProtectionMonitor:
                 self._cooldown[key] = now
         except Exception as exc:  # pragma: no cover
             logger.warning(f"强制保护计算异常 inst={entry.get('instId')} err={exc}")
+
+    def _resolve_threshold(self, inst_id: str) -> ProtectionThresholds:
+        key = str(inst_id or "").strip().upper()
+        if key and key in self.per_inst_thresholds:
+            return self.per_inst_thresholds[key]
+        return self.thresholds
+
+    @staticmethod
+    def _normalize_threshold(node: ProtectionThresholds | Dict[str, Any]) -> Optional[ProtectionThresholds]:
+        if isinstance(node, ProtectionThresholds):
+            return ProtectionThresholds(
+                take_profit_pct=max(0.0, float(node.take_profit_pct or 0.0)),
+                stop_loss_pct=max(0.0, float(node.stop_loss_pct or 0.0)),
+            )
+        if not isinstance(node, dict):
+            return None
+        tp = max(0.0, float(node.get("take_profit_pct") or 0.0))
+        sl = max(0.0, float(node.get("stop_loss_pct") or 0.0))
+        return ProtectionThresholds(take_profit_pct=tp, stop_loss_pct=sl)
 
     @staticmethod
     def _infer_direction(pos_side_raw: str, raw_size: float) -> Optional[str]:
@@ -170,13 +210,13 @@ class ProtectionMonitor:
             td_mode = "cross"
         sz_text = f"{abs(size):.8f}".rstrip("0").rstrip(".")
         logger.info(
-            "Protection triggered inst={} side={} dir={} ratio={:.2%} reason={} sz={}",
-            inst_id,
-            pos_side or "net",
-            direction_side,
-            profit_ratio,
-            reason,
-            sz_text,
+            "event=protection_triggered inst_id={inst} side={side} direction={direction} ratio={ratio:.2%} reason={reason} sz={sz}",
+            inst=inst_id,
+            side=pos_side or "net",
+            direction=direction_side,
+            ratio=profit_ratio,
+            reason=reason,
+            sz=sz_text,
         )
         try:
             resp = self.okx.place_order(
@@ -185,6 +225,7 @@ class ProtectionMonitor:
                 side=order_side,
                 ord_type="market",
                 sz=sz_text,
+                cl_ord_id=f"px{uuid.uuid4().hex[:30]}",
                 pos_side="" if (pos_side or "").lower() == "net" else pos_side,
                 reduce_only=True,
             )

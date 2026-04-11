@@ -14,7 +14,7 @@ from core.client import OKXClient
 
 DEFAULT_CONFIG_PATH = Path("watchlist.json")
 DEFAULT_TIMEFRAME = "5m"
-DEFAULT_HIGHER_TIMEFRAMES: Tuple[str, ...] = ("15m", "1H")
+DEFAULT_HIGHER_TIMEFRAMES: Tuple[str, ...] = ("1H",)
 
 
 def load_watchlist(path: Path = DEFAULT_CONFIG_PATH) -> List[Dict[str, Any]]:
@@ -25,7 +25,11 @@ def load_watchlist(path: Path = DEFAULT_CONFIG_PATH) -> List[Dict[str, Any]]:
     return [normalize_entry(entry) for entry in raw]
 
 
-def normalize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_entry(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, str):
+        entry = {"inst_id": entry}
+    elif not isinstance(entry, dict):
+        raise ValueError("watchlist entry must be an object or inst_id string")
     inst_id = str(entry.get("inst_id") or "").strip()
     if not inst_id:
         raise ValueError("watchlist entry missing inst_id")
@@ -46,6 +50,21 @@ def normalize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
         result["max_position"] = float(entry["max_position"])
     if "protection" in entry and isinstance(entry["protection"], dict):
         result["protection"] = entry["protection"]
+    news_query = str(entry.get("news_query") or "").strip()
+    if news_query:
+        result["news_query"] = news_query
+    news_coin_id = str(entry.get("news_coin_id") or "").strip()
+    if news_coin_id:
+        result["news_coin_id"] = news_coin_id
+    raw_aliases = entry.get("news_aliases")
+    if isinstance(raw_aliases, str):
+        news_aliases = tuple(part.strip() for part in raw_aliases.split(",") if part.strip())
+    elif isinstance(raw_aliases, (list, tuple)):
+        news_aliases = tuple(str(part).strip() for part in raw_aliases if str(part).strip())
+    else:
+        news_aliases = ()
+    if news_aliases:
+        result["news_aliases"] = news_aliases
     return result
 
 

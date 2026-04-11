@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
 import pandas as pd
@@ -22,9 +23,82 @@ CANDLE_COLUMNS = [
     "volume_usd",
     "confirm",
 ]
+DEFAULT_INDICATOR_WINDOWS = {
+    "rsi": 14,
+    "ema_fast": 12,
+    "ema_slow": 26,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_sign": 9,
+    "atr": 14,
+    "bb": 20,
+    "mfi": 14,
+    "stoch": 14,
+    "cci": 20,
+    "adx": 14,
+    "williams": 14,
+    "ichimoku1": 9,
+    "ichimoku2": 26,
+    "ichimoku3": 52,
+}
 
 
-def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
+def _to_int(value: object, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    if parsed <= 0:
+        return fallback
+    return parsed
+
+
+def _resolve_indicator_windows(inst_id: str, timeframe: str, overrides_raw: str) -> dict[str, int]:
+    windows = dict(DEFAULT_INDICATOR_WINDOWS)
+    text = str(overrides_raw or "").strip()
+    if not text:
+        return windows
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return windows
+    if not isinstance(payload, dict):
+        return windows
+
+    def _apply(node: object) -> None:
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            key_text = str(key or "").strip()
+            if key_text not in windows:
+                continue
+            windows[key_text] = _to_int(value, windows[key_text])
+
+    _apply(payload.get("default"))
+    if timeframe:
+        _apply(payload.get(str(timeframe)))
+    inst_tf_key = f"{(inst_id or '').upper()}@{(timeframe or '').lower()}"
+    if inst_tf_key:
+        _apply(payload.get(inst_tf_key))
+
+    windows["ema_fast"] = max(2, windows["ema_fast"])
+    windows["ema_slow"] = max(windows["ema_fast"] + 1, windows["ema_slow"])
+    windows["macd_fast"] = max(2, windows["macd_fast"])
+    windows["macd_slow"] = max(windows["macd_fast"] + 1, windows["macd_slow"])
+    windows["macd_sign"] = max(2, windows["macd_sign"])
+    windows["ichimoku1"] = max(2, windows["ichimoku1"])
+    windows["ichimoku2"] = max(windows["ichimoku1"] + 1, windows["ichimoku2"])
+    windows["ichimoku3"] = max(windows["ichimoku2"] + 1, windows["ichimoku3"])
+    return windows
+
+
+def candles_to_dataframe(
+    raw_candles: Iterable[Iterable[str]],
+    *,
+    timeframe: str = "",
+    inst_id: str = "",
+    indicator_overrides: str = "",
+) -> pd.DataFrame:
     """将 OKX K 线转换为带指标的 DataFrame."""
 
     rows = list(raw_candles)
@@ -46,11 +120,17 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
     df.dropna(subset=["ts"], inplace=True)
     df.sort_values("ts", inplace=True)
     df.reset_index(drop=True, inplace=True)
+    windows = _resolve_indicator_windows(inst_id=inst_id, timeframe=timeframe, overrides_raw=indicator_overrides)
     df["returns"] = df["close"].pct_change().fillna(0)
-    df["rsi"] = RSIIndicator(close=df["close"], window=14).rsi()
-    df["ema_fast"] = EMAIndicator(close=df["close"], window=12).ema_indicator()
-    df["ema_slow"] = EMAIndicator(close=df["close"], window=26).ema_indicator()
-    macd = MACD(close=df["close"], window_fast=12, window_slow=26, window_sign=9)
+    df["rsi"] = RSIIndicator(close=df["close"], window=windows["rsi"]).rsi()
+    df["ema_fast"] = EMAIndicator(close=df["close"], window=windows["ema_fast"]).ema_indicator()
+    df["ema_slow"] = EMAIndicator(close=df["close"], window=windows["ema_slow"]).ema_indicator()
+    macd = MACD(
+        close=df["close"],
+        window_fast=windows["macd_fast"],
+        window_slow=windows["macd_slow"],
+        window_sign=windows["macd_sign"],
+    )
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
     df["macd_hist"] = macd.macd_diff()
@@ -58,9 +138,9 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
         high=df["high"],
         low=df["low"],
         close=df["close"],
-        window=14,
+        window=windows["atr"],
     ).average_true_range()
-    bb = BollingerBands(close=df["close"], window=20, window_dev=2.0)
+    bb = BollingerBands(close=df["close"], window=windows["bb"], window_dev=2.0)
     df["bb_high"] = bb.bollinger_hband()
     df["bb_low"] = bb.bollinger_lband()
     band_range = df["bb_high"] - df["bb_low"]
@@ -68,13 +148,19 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
     df["bb_width"] = (band_range / close).fillna(0)
     obv = OnBalanceVolumeIndicator(close=df["close"], volume=df["volume"])
     df["obv"] = obv.on_balance_volume()
-    mfi = MFIIndicator(high=df["high"], low=df["low"], close=df["close"], volume=df["volume"], window=14)
+    mfi = MFIIndicator(
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        volume=df["volume"],
+        window=windows["mfi"],
+    )
     df["mfi"] = mfi.money_flow_index()
 
     # 新增指标：Stochastic Oscillator
     stoch = StochasticOscillator(
         high=df["high"], low=df["low"], close=df["close"],
-        window=14, smooth_window=3
+        window=windows["stoch"], smooth_window=3
     )
     df["stoch_k"] = stoch.stoch()
     df["stoch_d"] = stoch.stoch_signal()
@@ -85,14 +171,14 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
     # 新增指标：CCI (商品通道指标)
     cci = CCIIndicator(
         high=df["high"], low=df["low"], close=df["close"],
-        window=20
+        window=windows["cci"]
     )
     df["cci"] = cci.cci()
 
     # 新增指标：ADX (趋势强度指标)
     adx = ADXIndicator(
         high=df["high"], low=df["low"], close=df["close"],
-        window=14
+        window=windows["adx"]
     )
     df["adx"] = adx.adx()
     df["adx_pos"] = adx.adx_pos()
@@ -101,14 +187,16 @@ def candles_to_dataframe(raw_candles: Iterable[Iterable[str]]) -> pd.DataFrame:
     # 新增指标：Williams %R
     williams = WilliamsRIndicator(
         high=df["high"], low=df["low"], close=df["close"],
-        lbp=14
+        lbp=windows["williams"]
     )
     df["williams_r"] = williams.williams_r()
 
     # 新增指标：Ichimoku (一目均衡表)
     ichimoku = IchimokuIndicator(
         high=df["high"], low=df["low"],
-        window1=9, window2=26, window3=52
+        window1=windows["ichimoku1"],
+        window2=windows["ichimoku2"],
+        window3=windows["ichimoku3"],
     )
     df["ichimoku_conv"] = ichimoku.ichimoku_conversion_line()
     df["ichimoku_base"] = ichimoku.ichimoku_base_line()
