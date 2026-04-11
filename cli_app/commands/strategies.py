@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from dotenv import set_key
@@ -12,7 +13,7 @@ from core.strategy.plugins import (
     parse_plugin_weights,
 )
 
-from cli_app.helpers import ENV_FILE
+ENV_FILE = Path(".env")
 
 
 def _refresh_settings_cache() -> None:

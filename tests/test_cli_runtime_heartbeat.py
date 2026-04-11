@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli_app.helpers import _read_runtime_heartbeat, _write_runtime_heartbeat
+from cli_app.runtime_helpers import _read_runtime_heartbeat, _write_runtime_heartbeat
 
 
 def test_runtime_heartbeat_roundtrip(tmp_path) -> None:

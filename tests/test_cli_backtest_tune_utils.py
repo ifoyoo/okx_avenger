@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from cli_app.helpers import _market_regime_bucket, _plugin_score, _scores_to_weights
+from cli_app.backtest_helpers import _market_regime_bucket, _plugin_score, _scores_to_weights
 
 
 def test_scores_to_weights_monotonic() -> None:
