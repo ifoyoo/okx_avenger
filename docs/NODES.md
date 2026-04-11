@@ -9,7 +9,7 @@
 ## 0. 总览（主链路）
 
 ```text
-CLI(main/cli) 
+CLI(cli.py/okx) 
   -> Config(.env -> settings)
   -> Watchlist(manual/auto/mixed)
   -> Data(REST/WS -> candles/features/snapshot)
@@ -17,8 +17,10 @@ CLI(main/cli)
   -> Strategy(plugins + fusion + sizing + protection)
   -> RiskManager
   -> ExecutionPlan -> place_order
-  -> Monitor/Log/Notify/Perf/Backtest
+  -> Monitor/Log/Notify/Perf
 ```
+
+`./okx strategies` and `./okx backtest` are treated as auxiliary CLI paths that live outside the primary live runtime chain (observability/tuning helpers and offline validation, respectively).
 
 ---
 

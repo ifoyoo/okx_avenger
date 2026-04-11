@@ -7,7 +7,7 @@
 - 负责人：Codex
 
 ## 下一步唯一目标
-- N2 入口收口已完成。下一步回到“cli-only 实盘观测期”：使用 `./okx run` 或 `./okx once --dry-run` 连续运行，并基于 heartbeat/决策日志做参数微调，不恢复 `main.py` 或启动 UI。
+- N2 入口收口已完成。下一步回到“cli-only 实盘观测期”：持续使用 `./okx run` 作为常驻观测/调度入口，必要时以 `./okx once --dry-run` 做单次参数/链路校验，并基于 heartbeat/决策日志做微调，不恢复 `main.py` 或启动 UI。
 
 ## 执行范围（预期会改）
 - `logs/`、`data/config_snapshot.json`、`data/runtime_heartbeat.json`（运行观测）
