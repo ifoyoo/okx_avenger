@@ -18,10 +18,10 @@ from cli_app.backtest_helpers import (
     _plugin_score,
     _print_backtest_summary,
     _run_single_backtest,
-    _safe_float,
     _save_backtest_records,
     _scores_to_weights,
 )
+from cli_app.backtest_reporting import format_trade_lines, format_tune_lines
 from cli_app.context import RuntimeBundle
 from cli_app.runtime_helpers import DEFAULT_TIMEFRAME, _resolve_entries, _safe_account_snapshot
 from cli_app.strategy_config_helpers import (
@@ -109,24 +109,8 @@ def _filter_backtest_records(records: List[Dict[str, Any]], inst: str | None) ->
 
 
 def _print_trade_rows(records: List[Dict[str, Any]], max_trades: int) -> None:
-    print("\n=== Trades (latest first) ===")
-    for item in records:
-        summary = item.get("summary") or {}
-        trades = list(item.get("trades") or [])
-        inst_id = str(summary.get("inst_id", "-"))
-        timeframe = str(summary.get("timeframe", "-"))
-        print(f"\n[{inst_id} {timeframe}]")
-        for trade in list(reversed(trades))[:max_trades]:
-            side = str(trade.get("side", "-")).upper()
-            qty = _safe_float(trade.get("qty"))
-            entry = _safe_float(trade.get("entry_price"))
-            exit_px = _safe_float(trade.get("exit_price"))
-            net = _safe_float(trade.get("net_pnl"))
-            held = int(_safe_float(trade.get("bars_held")))
-            print(
-                f"- {side:<4} qty={qty:.6f} entry={entry:.6f} exit={exit_px:.6f} "
-                f"net={net:+.4f} held={held}"
-            )
+    for line in format_trade_lines(records, max_trades):
+        print(line)
 
 
 def report_backtest(args: argparse.Namespace) -> int:
@@ -164,33 +148,15 @@ def _print_tune_report(
     regime_score_buckets: Dict[str, Dict[str, List[float]]],
     scanned_instruments: int,
 ) -> None:
-    print("=== Backtest Tune ===")
-    print(f"instruments={scanned_instruments} lookback_bars={args.limit}")
-    print(f"{'plugin':<24} {'samples':<8} {'trades':<8} {'win_rate':<9} {'net_pnl':<12} {'score':<8} {'weight':<7}")
-    print("-" * 88)
-    for name, score in sorted(scores.items(), key=lambda item: item[1], reverse=True):
-        weight = weights.get(name, 1.0)
-        rows = stats_rows.get(name) or []
-        samples = len(rows)
-        avg_trades = sum(item[0] for item in rows) / samples if samples else 0.0
-        avg_win_rate = sum(item[1] for item in rows) / samples if samples else 0.0
-        avg_net = sum(item[2] for item in rows) / samples if samples else 0.0
-        print(
-            f"{name:<24} {samples:<8d} {avg_trades:<8.1f} {avg_win_rate:>6.1f}%  {avg_net:>+10.2f}  {score:>+7.4f}  {weight:>5.2f}"
-        )
-
-    print("\n=== Regime Buckets ===")
-    for regime, per_plugin in sorted(regime_score_buckets.items(), key=lambda item: item[0]):
-        print(f"[{regime}]")
-        regime_rows: List[Tuple[str, float]] = []
-        for name, values in per_plugin.items():
-            if values:
-                regime_rows.append((name, sum(values) / len(values)))
-        if not regime_rows:
-            print("- (no data)")
-            continue
-        for name, avg_score in sorted(regime_rows, key=lambda item: item[1], reverse=True):
-            print(f"- {name:<22} avg_score={avg_score:+.4f}")
+    for line in format_tune_lines(
+        lookback_bars=int(args.limit),
+        scanned_instruments=scanned_instruments,
+        scores=scores,
+        weights=weights,
+        stats_rows=stats_rows,
+        regime_score_buckets=regime_score_buckets,
+    ):
+        print(line)
 
 
 def _apply_tune_weights(weights: Dict[str, float], names: List[str]) -> None:
