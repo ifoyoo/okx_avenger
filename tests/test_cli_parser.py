@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
+
 from cli import build_parser
+from cli_app.backtest_parser import register_backtest_commands
+from cli_app.config_parser import register_config_commands
+from cli_app.runtime_parser import register_runtime_commands
+from cli_app.strategies_parser import register_strategy_commands
 
 
 def test_once_command_parsing() -> None:
@@ -75,3 +81,49 @@ def test_backtest_tune_parsing() -> None:
     assert args.backtest_action == "tune"
     assert args.inst == "BTC-USDT-SWAP"
     assert args.apply is True
+
+
+def test_runtime_parser_module_registers_status() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    register_runtime_commands(sub)
+
+    args = parser.parse_args(["status"])
+
+    assert args.command == "status"
+
+
+def test_config_parser_module_registers_api_check() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    register_config_commands(sub)
+
+    args = parser.parse_args(["config-check", "--api-check"])
+
+    assert args.command == "config-check"
+    assert args.api_check is True
+
+
+def test_strategies_parser_module_registers_enable() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    register_strategy_commands(sub)
+
+    args = parser.parse_args(["strategies", "enable", "bull_trend"])
+
+    assert args.command == "strategies"
+    assert args.strategy_action == "enable"
+    assert args.names == ["bull_trend"]
+
+
+def test_backtest_parser_module_registers_report() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    register_backtest_commands(sub)
+
+    args = parser.parse_args(["backtest", "report", "--file", "sample.json", "--show-trades"])
+
+    assert args.command == "backtest"
+    assert args.backtest_action == "report"
+    assert args.file == "sample.json"
+    assert args.show_trades is True
