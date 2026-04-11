@@ -2,28 +2,20 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
-
-from loguru import logger
+from typing import Any, Dict, List
 
 from config.settings import get_settings
-from core.backtest import BacktestResult
-from core.strategy.plugins import SignalPluginManager
 
+from cli_app.backtest_execution import collect_backtest_records, collect_tuning_snapshot
 from cli_app.backtest_helpers import (
     BACKTEST_LATEST,
-    _build_features_for_backtest,
     _load_backtest_records,
-    _market_regime_bucket,
-    _plugin_score,
     _print_backtest_summary,
-    _run_single_backtest,
     _save_backtest_records,
-    _scores_to_weights,
 )
 from cli_app.backtest_reporting import format_trade_lines, format_tune_lines
 from cli_app.context import RuntimeBundle
-from cli_app.runtime_helpers import DEFAULT_TIMEFRAME, _resolve_entries, _safe_account_snapshot
+from cli_app.runtime_helpers import _resolve_entries, _safe_account_snapshot
 from cli_app.strategy_config_helpers import (
     _print_strategies,
     _refresh_settings_cache,
@@ -56,37 +48,7 @@ def run_backtest_for_bundle(bundle: RuntimeBundle, args: argparse.Namespace) -> 
     if not entries:
         return 2
 
-    records: List[Dict[str, Any]] = []
-    for item in entries:
-        inst_id = item["inst_id"]
-        timeframe = item.get("timeframe", DEFAULT_TIMEFRAME)
-        max_position = float(item.get("max_position", bundle.settings.runtime.default_max_position))
-        try:
-            features = _build_features_for_backtest(bundle.okx, inst_id, timeframe, args.limit)
-        except Exception as exc:
-            logger.warning("回测拉取K线失败 inst={} tf={} err={}", inst_id, timeframe, exc)
-            continue
-        if features.empty:
-            continue
-        try:
-            result: BacktestResult = _run_single_backtest(
-                strategy=bundle.engine.strategy,
-                features=features,
-                inst_id=inst_id,
-                timeframe=timeframe,
-                warmup=args.warmup,
-                initial_equity=args.initial_equity,
-                max_position=max_position if max_position > 0 else bundle.settings.runtime.default_max_position,
-                leverage=bundle.engine.leverage,
-                fee_rate=args.fee_rate,
-                slippage_ratio=args.slippage_ratio,
-                spread_ratio=args.spread_ratio,
-                max_hold_bars=args.max_hold_bars,
-            )
-        except Exception as exc:
-            logger.warning("回测执行失败 inst={} tf={} err={}", inst_id, timeframe, exc)
-            continue
-        records.append(result.to_dict())
+    records = collect_backtest_records(bundle=bundle, args=args, entries=entries)
 
     if not records:
         print("没有生成任何回测结果。")
@@ -131,30 +93,18 @@ def report_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_tune_weights(score_buckets: Dict[str, List[float]]) -> Dict[str, float]:
-    scores: Dict[str, float] = {}
-    for name, values in score_buckets.items():
-        if values:
-            scores[name] = sum(values) / len(values)
-    return _scores_to_weights(scores)
-
-
 def _print_tune_report(
     *,
     args: argparse.Namespace,
-    scores: Dict[str, float],
-    weights: Dict[str, float],
-    stats_rows: Dict[str, List[Tuple[int, float, float]]],
-    regime_score_buckets: Dict[str, Dict[str, List[float]]],
-    scanned_instruments: int,
+    snapshot,
 ) -> None:
     for line in format_tune_lines(
         lookback_bars=int(args.limit),
-        scanned_instruments=scanned_instruments,
-        scores=scores,
-        weights=weights,
-        stats_rows=stats_rows,
-        regime_score_buckets=regime_score_buckets,
+        scanned_instruments=snapshot.scanned_instruments,
+        scores=snapshot.scores,
+        weights=snapshot.weights,
+        stats_rows=snapshot.stats_rows,
+        regime_score_buckets=snapshot.regime_score_buckets,
     ):
         print(line)
 
@@ -172,73 +122,18 @@ def tune_backtest_for_bundle(bundle: RuntimeBundle, args: argparse.Namespace) ->
         return 2
 
     names = _strategy_names_from_settings(bundle.settings)
-    score_buckets: Dict[str, List[float]] = {name: [] for name in names}
-    stats_rows: Dict[str, List[Tuple[int, float, float]]] = {name: [] for name in names}
-    regime_score_buckets: Dict[str, Dict[str, List[float]]] = {}
-    scanned_instruments = 0
-
-    original_manager = bundle.engine.strategy.signal_generator.plugin_manager
-    try:
-        for target in entries:
-            inst_id = target["inst_id"]
-            timeframe = target.get("timeframe", DEFAULT_TIMEFRAME)
-            max_position = float(target.get("max_position", bundle.settings.runtime.default_max_position))
-            try:
-                features = _build_features_for_backtest(bundle.okx, inst_id, timeframe, args.limit)
-            except Exception as exc:
-                logger.warning("调参拉取K线失败 inst={} tf={} err={}", inst_id, timeframe, exc)
-                continue
-            if features.empty:
-                continue
-
-            scanned_instruments += 1
-            regime = _market_regime_bucket(features)
-            regime_score_buckets.setdefault(regime, {name: [] for name in names})
-
-            for name in names:
-                bundle.engine.strategy.signal_generator.plugin_manager = SignalPluginManager(
-                    enabled_raw=name,
-                    weights_raw="",
-                )
-                result = _run_single_backtest(
-                    strategy=bundle.engine.strategy,
-                    features=features,
-                    inst_id=inst_id,
-                    timeframe=timeframe,
-                    warmup=args.warmup,
-                    initial_equity=args.initial_equity,
-                    max_position=max_position if max_position > 0 else bundle.settings.runtime.default_max_position,
-                    leverage=bundle.engine.leverage,
-                    fee_rate=args.fee_rate,
-                    slippage_ratio=args.slippage_ratio,
-                    spread_ratio=args.spread_ratio,
-                    max_hold_bars=args.max_hold_bars,
-                )
-                summary = result.summary
-                score = _plugin_score(result.to_dict()["summary"], args.initial_equity)
-                score_buckets[name].append(score)
-                stats_rows[name].append((summary.total_trades, summary.win_rate * 100, summary.net_pnl))
-                regime_score_buckets[regime][name].append(score)
-    finally:
-        bundle.engine.strategy.signal_generator.plugin_manager = original_manager
-
-    if scanned_instruments <= 0:
+    snapshot = collect_tuning_snapshot(bundle=bundle, args=args, entries=entries, names=names)
+    if snapshot.scanned_instruments <= 0:
         print("没有可用K线数据，无法调参。")
         return 2
 
-    scores = {name: sum(values) / len(values) for name, values in score_buckets.items() if values}
-    weights = _build_tune_weights(score_buckets)
     _print_tune_report(
         args=args,
-        scores=scores,
-        weights=weights,
-        stats_rows=stats_rows,
-        regime_score_buckets=regime_score_buckets,
-        scanned_instruments=scanned_instruments,
+        snapshot=snapshot,
     )
 
     if args.apply:
-        _apply_tune_weights(weights, names)
+        _apply_tune_weights(snapshot.weights, names)
     else:
         print("\nℹ️ 仅预览，未写入 .env。加 --apply 可应用。")
     return 0
