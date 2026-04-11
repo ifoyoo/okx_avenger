@@ -8,6 +8,7 @@ from pathlib import Path
 from loguru import logger
 
 from cli_app.context import RuntimeBundle
+from cli_app.runtime_reporting import format_runtime_status_lines
 from cli_app.runtime_execution import log_strategy_snapshot, run_runtime_cycle
 from cli_app.runtime_helpers import (
     _read_runtime_heartbeat,
@@ -63,30 +64,20 @@ def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
 
 def show_runtime_status(bundle: RuntimeBundle) -> int:
     account_snapshot = _safe_account_snapshot(bundle.engine)
-    print("=== Account ===")
-    for row in _format_account_lines(account_snapshot):
-        print(row)
-
-    print("\n=== Watchlist ===")
     entries = bundle.watchlist_manager.get_watchlist(account_snapshot)
-    for row in _format_watchlist_lines(entries):
-        print(row)
-
-    print("\n=== Position ===")
     try:
         positions = bundle.okx.get_positions(inst_type="SWAP").get("data") or []
     except Exception as exc:
         print(f"query failed: {exc}")
         return 1
-    if not positions:
-        print("(no positions)")
-    else:
-        for row in _format_position_lines(positions):
-            print(row)
 
     heartbeat_path = Path(bundle.settings.runtime.runtime_heartbeat_path)
     heartbeat = _read_runtime_heartbeat(heartbeat_path)
-    print("\n=== Runtime Heartbeat ===")
-    for row in _format_heartbeat_lines(heartbeat_path, heartbeat):
-        print(row)
+    for line in format_runtime_status_lines(
+        account_lines=_format_account_lines(account_snapshot),
+        watchlist_lines=_format_watchlist_lines(entries),
+        position_lines=_format_position_lines(positions) if positions else [],
+        heartbeat_lines=_format_heartbeat_lines(heartbeat_path, heartbeat),
+    ):
+        print(line)
     return 0
