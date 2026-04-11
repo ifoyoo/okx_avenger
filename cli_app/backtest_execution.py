@@ -30,6 +30,38 @@ class BacktestTuningSnapshot:
     scanned_instruments: int
 
 
+def _effective_max_position(bundle: RuntimeBundle, raw_value: Any) -> float:
+    max_position = float(raw_value or 0.0)
+    if max_position > 0:
+        return max_position
+    return float(bundle.settings.runtime.default_max_position)
+
+
+def _run_backtest_entry(
+    *,
+    bundle: RuntimeBundle,
+    args: argparse.Namespace,
+    inst_id: str,
+    timeframe: str,
+    features: Any,
+    max_position: Any,
+):
+    return _run_single_backtest(
+        strategy=bundle.engine.strategy,
+        features=features,
+        inst_id=inst_id,
+        timeframe=timeframe,
+        warmup=args.warmup,
+        initial_equity=args.initial_equity,
+        max_position=_effective_max_position(bundle, max_position),
+        leverage=bundle.engine.leverage,
+        fee_rate=args.fee_rate,
+        slippage_ratio=args.slippage_ratio,
+        spread_ratio=args.spread_ratio,
+        max_hold_bars=args.max_hold_bars,
+    )
+
+
 def collect_backtest_records(
     *,
     bundle: RuntimeBundle,
@@ -40,7 +72,7 @@ def collect_backtest_records(
     for item in entries:
         inst_id = item["inst_id"]
         timeframe = item.get("timeframe", DEFAULT_TIMEFRAME)
-        max_position = float(item.get("max_position", bundle.settings.runtime.default_max_position))
+        max_position = item.get("max_position")
         try:
             features = _build_features_for_backtest(bundle.okx, inst_id, timeframe, args.limit)
         except Exception as exc:
@@ -49,19 +81,13 @@ def collect_backtest_records(
         if features.empty:
             continue
         try:
-            result: BacktestResult = _run_single_backtest(
-                strategy=bundle.engine.strategy,
-                features=features,
+            result: BacktestResult = _run_backtest_entry(
+                bundle=bundle,
+                args=args,
                 inst_id=inst_id,
                 timeframe=timeframe,
-                warmup=args.warmup,
-                initial_equity=args.initial_equity,
-                max_position=max_position if max_position > 0 else bundle.settings.runtime.default_max_position,
-                leverage=bundle.engine.leverage,
-                fee_rate=args.fee_rate,
-                slippage_ratio=args.slippage_ratio,
-                spread_ratio=args.spread_ratio,
-                max_hold_bars=args.max_hold_bars,
+                features=features,
+                max_position=max_position,
             )
         except Exception as exc:
             logger.warning("回测执行失败 inst={} tf={} err={}", inst_id, timeframe, exc)
@@ -87,7 +113,7 @@ def collect_tuning_snapshot(
         for target in entries:
             inst_id = target["inst_id"]
             timeframe = target.get("timeframe", DEFAULT_TIMEFRAME)
-            max_position = float(target.get("max_position", bundle.settings.runtime.default_max_position))
+            max_position = target.get("max_position")
             try:
                 features = _build_features_for_backtest(bundle.okx, inst_id, timeframe, args.limit)
             except Exception as exc:
@@ -105,19 +131,13 @@ def collect_tuning_snapshot(
                     enabled_raw=name,
                     weights_raw="",
                 )
-                result = _run_single_backtest(
-                    strategy=bundle.engine.strategy,
-                    features=features,
+                result = _run_backtest_entry(
+                    bundle=bundle,
+                    args=args,
                     inst_id=inst_id,
                     timeframe=timeframe,
-                    warmup=args.warmup,
-                    initial_equity=args.initial_equity,
-                    max_position=max_position if max_position > 0 else bundle.settings.runtime.default_max_position,
-                    leverage=bundle.engine.leverage,
-                    fee_rate=args.fee_rate,
-                    slippage_ratio=args.slippage_ratio,
-                    spread_ratio=args.spread_ratio,
-                    max_hold_bars=args.max_hold_bars,
+                    features=features,
+                    max_position=max_position,
                 )
                 summary = result.summary
                 score = _plugin_score(result.to_dict()["summary"], args.initial_equity)
