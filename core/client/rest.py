@@ -307,6 +307,15 @@ class OKXClient:
     def get_positions(self, inst_type: str = "SWAP") -> Dict[str, Any]:
         return self._request("positions", self._account.get_positions, instType=inst_type)
 
+    def list_pending_orders(self, inst_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        inst_type = self._infer_inst_type(inst_id) if inst_id else "SWAP"
+        try:
+            resp = self._request("orders_pending", self._trade.get_orders_pending, instType=inst_type, instId=inst_id or "")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("查询未成交委托失败 inst={} err={}", inst_id, exc)
+            return []
+        return resp.get("data") or []
+
     def list_conditional_algos(self, inst_id: Optional[str] = None) -> List[Dict[str, Any]]:
         inst_type = self._infer_inst_type(inst_id) if inst_id else ""
         try:

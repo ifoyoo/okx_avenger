@@ -466,6 +466,45 @@ def test_execution_step_allows_fresh_data(monkeypatch) -> None:
     assert bundle.plan.blocked is False
 
 
+def test_execution_step_blocks_when_live_pending_order_exists(monkeypatch) -> None:
+    engine = _build_engine()
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="limit",
+        size=0.01,
+        price=99.5,
+        est_slippage=0.001,
+    )
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(engine.execution_engine, "has_live_pending_order", lambda inst_id: inst_id == "BTC-USDT-SWAP")
+
+    def _should_not_execute(_plan):
+        raise AssertionError("existing pending order should block duplicate execution")
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _should_not_execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+    )
+
+    assert bundle.plan.blocked is True
+    assert bundle.report is None
+    assert "未成交委托" in (bundle.plan.block_reason or "")
+
+
 def test_feature_min_samples_gate() -> None:
     engine = _build_engine()
     engine.feature_min_samples = 5

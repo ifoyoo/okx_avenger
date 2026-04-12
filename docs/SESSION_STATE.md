@@ -5,8 +5,8 @@
 ## 元信息
 - 最后更新时间：2026-04-12
 - 当前主线：按 `docs/NODES.md` 推进
-- 当前批次：四阶段策略/分析质量提升已完成；watchlist 已收口为 manual-only；TP/SL / 通知 / release hardening 已收口；当前进入上线前 smoke 与参数观测
-- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐；CLI/runtime/通知/backtest 输出已统一为 summary-first 契约
+- 当前批次：四阶段策略/分析质量提升已完成；watchlist 已收口为 manual-only；TP/SL / 通知 / release hardening 已收口；上线前 smoke 期间补上执行对账与重复下单闸门
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐；CLI/runtime/通知/backtest 输出已统一为 summary-first 契约；live pending limit 单不会再被误判为失败，且同标的存在未成交委托时会阻断重复下单
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
@@ -29,6 +29,28 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-12
+- 节点：执行对账修复 - live pending order reconcile
+- 目标：修复真实运行中“OKX 已接受限价单，但系统因未立即观察到持仓而把结果记成 `PENDING_TIMEOUT`”的问题，并防止同标的在已有未成交委托时继续重复下单。
+- 结果：完成。`ExecutionEngine.execute()` 在未观察到持仓后会额外对账 `orders_pending`，若发现同 `clOrdId` 的 `live/partially_filled` 委托，则返回已提交而非失败；`TradingEngine._run_execution_step()` 新增 pending-order 闸门，若同标的已存在 live pending 单则直接阻断本轮重复下单；补充 `.editorconfig` 与 `.vscode/settings.json`，锁定 `watchlist.json` 为 2 空格缩进，避免保存后格式漂移。当前已确认导致事故的真实单是 `PUMP-USDT-SWAP` 历史残留 live 单，但本次代码未自动撤单。
+- 变更文件：
+  - `core/client/rest.py`
+  - `core/engine/execution.py`
+  - `core/engine/trading.py`
+  - `tests/test_execution_clordid.py`
+  - `tests/test_trading_pipeline.py`
+  - `.editorconfig`
+  - `.vscode/settings.json`
+  - `watchlist.json`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_execution_clordid.py tests/test_trading_pipeline.py` -> `13 passed`
+  - `.venv/bin/python -m pytest -q` -> `183 passed`
+  - `git diff --check` -> `clean`
+  - `./okx config-check` -> `pass`
+
 - 时间：2026-04-12
 - 节点：输出优化 - summary-first output contract
 - 目标：统一 `config-check`、`status`、runtime 日志、Telegram 通知与 backtest/tune 报告的表达层，让人类扫读成本明显下降。

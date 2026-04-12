@@ -4,6 +4,17 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0026 - live pending limit 单视为“已提交”，并对同标的增加重复下单闸门
+- 背景：真实运行日志显示 `PUMP-USDT-SWAP` / `WLFI-USDT-SWAP` 的限价单已被 OKX 接受并挂出，但执行对账只检查“是否立即出现持仓”，导致结果被误记为 `PENDING_TIMEOUT`；同时系统没有针对“该标的已存在未成交委托”的重复下单保护。
+- 决策：
+  - `ExecutionEngine.execute()` 在未观察到持仓后，追加查询 `orders_pending`；若发现同 `clOrdId` 的 `live/partially_filled` 普通委托，则返回 `success=True`，视为订单已提交到交易所。
+  - `TradingEngine._run_execution_step()` 在真实下单前先检查该标的是否已有 live pending 单；若存在，则直接阻断本轮重复下单，并把原因写入 `block_reason` 和结构化日志。
+  - `OKXClient` 新增 `list_pending_orders()` 封装，作为执行对账和重复下单闸门的统一入口。
+  - 同步增加 `.editorconfig` 与 `.vscode/settings.json`，固定 `watchlist.json` 的 2 空格 JSON 缩进，避免用户保存后格式反复漂移。
+- 原因：对于限价单，交易所“已接受并挂单”与“已形成持仓”不是同一时刻；继续把前者记成失败，会误导 runtime 结果、通知和人工判断。既然当前策略不需要同标的并发挂多张单，就应该在执行前显式挡住重复下单。
+- 影响：runtime 遇到 live pending limit 单时不再误报 `PENDING_TIMEOUT`；同标的不会在已有未成交委托时继续叠加新单；`watchlist.json` 保存格式更稳定。
+- 回滚方案：若未来要支持同标的多张并发工作单，需要把“按标的一刀切阻断”细化为按方向 / reduce-only / `clOrdId` 分层判断；但不应回退“live pending 单被视为失败”的旧行为。
+
 ### 2026-04-12 - D0025 - 输出层统一采用 summary-first 契约
 - 背景：项目主链路已经可用，但 `config-check`、`status`、runtime 日志、Telegram 通知、backtest 报告仍像不同阶段各写一套，信息虽多但扫读成本高。
 - 决策：

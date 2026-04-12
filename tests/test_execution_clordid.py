@@ -24,6 +24,21 @@ class _PendingOKXClient(_DummyOKXClient):
     def get_positions(self, inst_type: str = "SWAP"):
         return {"data": [{"instId": "BTC-USDT-SWAP", "pos": "0"}]}
 
+    def list_pending_orders(self, inst_id: str | None = None):
+        return []
+
+
+class _LivePendingLimitOKXClient(_PendingOKXClient):
+    def list_pending_orders(self, inst_id: str | None = None):
+        return [
+            {
+                "instId": "BTC-USDT-SWAP",
+                "clOrdId": "fixed-clordid-002",
+                "state": "live",
+                "ordType": "limit",
+            }
+        ]
+
 
 def test_build_plan_generates_cl_ord_id_with_trace(monkeypatch) -> None:
     monkeypatch.setattr("core.engine.execution.uuid.uuid4", lambda: SimpleNamespace(hex="f" * 32))
@@ -109,6 +124,29 @@ def test_execute_pending_timeout_when_no_position(monkeypatch) -> None:
         action=SignalAction.BUY,
         td_mode="cross",
         pos_side="long",
+        order_type="market",
+        size=0.01,
+        price=None,
+        est_slippage=0.0,
+        blocked=False,
+        cl_ord_id="fixed-clordid-002",
+    )
+
+    report = engine.execute(plan)
+
+    assert report.success is False
+    assert report.code == "PENDING_TIMEOUT"
+
+
+def test_execute_treats_live_limit_order_as_submitted(monkeypatch) -> None:
+    monkeypatch.setattr("core.engine.execution.time.sleep", lambda _s: None)
+    client = _LivePendingLimitOKXClient()
+    engine = ExecutionEngine(client, pending_timeout_seconds=0.01, reconcile_position=True)
+    plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
         order_type="limit",
         size=0.01,
         price=100.0,
@@ -119,8 +157,8 @@ def test_execute_pending_timeout_when_no_position(monkeypatch) -> None:
 
     report = engine.execute(plan)
 
-    assert report.success is False
-    assert report.code == "PENDING_TIMEOUT"
+    assert report.success is True
+    assert report.code is None
 
 
 def test_build_plan_resolves_attach_algo_orders_from_trade_protection() -> None:

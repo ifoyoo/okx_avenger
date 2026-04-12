@@ -535,6 +535,17 @@ class TradingEngine:
             execution_plan.protection = None
             execution_plan.notes = tuple(execution_plan.notes) + (stale_reason,)
             exec_logger.warning("event=data_stale_blocked reason={reason}", reason=stale_reason)
+        if (
+            not execution_plan.blocked
+            and signal.action in {SignalAction.BUY, SignalAction.SELL}
+            and self.execution_engine.has_live_pending_order(inst_id)
+        ):
+            pending_reason = f"存在未成交委托：{inst_id} 当前仍有 live pending 单，跳过重复下单。"
+            execution_plan.blocked = True
+            execution_plan.block_reason = pending_reason
+            execution_plan.protection = None
+            execution_plan.notes = tuple(execution_plan.notes) + (pending_reason,)
+            exec_logger.warning("event=pending_order_blocked reason={reason}", reason=pending_reason)
         execution_report: Optional[ExecutionReport] = None
         order_result: Optional[Dict[str, Any]] = None
         if not dry_run and not execution_plan.blocked:

@@ -221,6 +221,14 @@ class ExecutionEngine:
                 if self.pending_timeout_seconds > 0:
                     time.sleep(self.pending_timeout_seconds)
                 if not self._has_effective_position(plan.inst_id):
+                    if self._has_live_pending_order(plan.inst_id, cl_ord_id):
+                        logger.info(
+                            "Order accepted but still pending inst_id={} cl_ord_id={} ord_type={}",
+                            plan.inst_id,
+                            cl_ord_id,
+                            plan.order_type,
+                        )
+                        return ExecutionReport(plan=plan, success=True, response=resp)
                     return ExecutionReport(
                         plan=plan,
                         success=False,
@@ -253,6 +261,32 @@ class ExecutionEngine:
                 size = 0.0
             if size > 0:
                 return True
+        return False
+
+    def has_live_pending_order(self, inst_id: str) -> bool:
+        return self._has_live_pending_order(inst_id, None)
+
+    def _has_live_pending_order(self, inst_id: str, cl_ord_id: Optional[str]) -> bool:
+        if not hasattr(self.okx, "list_pending_orders"):
+            return False
+        try:
+            entries = self.okx.list_pending_orders(inst_id)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("查询未成交委托失败 inst_id={} err={}", inst_id, exc)
+            return False
+        inst_key = str(inst_id or "").upper()
+        cl_key = str(cl_ord_id or "").strip()
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("instId") or "").upper() != inst_key:
+                continue
+            state = str(entry.get("state") or "").strip().lower()
+            if state and state not in {"live", "partially_filled"}:
+                continue
+            if cl_key and str(entry.get("clOrdId") or "").strip() != cl_key:
+                continue
+            return True
         return False
 
     def _normalize_order_size(self, size: float, inst_id: str, latest_price: Optional[float]) -> str:
