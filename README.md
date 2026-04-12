@@ -2,6 +2,9 @@
 
 > Not here to look smart.  
 > Here to stay alive long enough to fire the next order.
+>
+> Market does not care about your feelings.  
+> Your stop loss should not care either.
 
 一个面向 OKX 永续合约的轻量自动交易 runtime。
 
@@ -13,12 +16,55 @@
 - 支持 Gemini LLM 辅助判断
 - 默认先用 `--dry-run`
 
+## What It Is
+
+这不是“量化平台”那种假大空玩具。
+
+这就是一套干脆的 OKX 合约运行框架：
+- 盯住少数标的
+- 拉数据
+- 做判断
+- 过风控
+- 下单或拦截
+- 把结果记下来并通知你
+
+不吹神话，不卖梦想，只管把链路接结实。
+
 ## Quick Start
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+## Structure
+
+```text
+okx_avenger/
+├── README.md
+├── requirements.txt
+├── .env
+├── watchlist.json
+├── okx                  # shell 入口
+├── cli.py               # CLI 主入口
+├── config/
+│   ├── base.py          # .env 加载
+│   └── settings.py      # 所有运行配置
+├── cli_app/
+│   ├── parser.py
+│   ├── context.py
+│   ├── runtime_*.py     # once / run / status
+│   ├── backtest_*.py    # 回测与调参
+│   └── strategy_*.py    # 策略开关与权重
+├── core/
+│   ├── analysis/        # 市场分析 / intel / llm brain
+│   ├── client/          # OKX REST / WebSocket
+│   ├── data/            # 特征 / 快照 / watchlist / performance
+│   ├── engine/          # risk / execution / trading
+│   ├── strategy/        # objective signals / fusion / sizing
+│   └── protection.py    # 止盈止损配置解析
+└── tests/               # 运行链路与核心模块测试
 ```
 
 ## Minimal Config
@@ -97,6 +143,7 @@ LLM_MAX_TOKENS=4096
 - 资金太小，系统会因为最小下单量直接拦截。
 - 杠杆要和 OKX 账户真实设置一致。
 - LLM 只该辅助，不该替你发疯。
+- Watchlist 少一点，归因才清楚。
 
 ## Attitude
 
