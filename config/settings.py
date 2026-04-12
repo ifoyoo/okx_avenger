@@ -138,6 +138,14 @@ class NotificationSettings(SettingsBase):
     level: str = Field("critical", alias="NOTIFY_LEVEL")
     cooldown_seconds: float = Field(600.0, alias="NOTIFY_COOLDOWN_SECONDS")
 
+    @field_validator("level", mode="before")
+    @classmethod
+    def _normalize_notification_level(cls, value: Optional[str]) -> str:
+        level = str(value or "critical").strip().lower()
+        if level not in {"critical", "orders", "all"}:
+            return "critical"
+        return level
+
 
 class LLMSettings(SettingsBase):
     enabled: bool = Field(False, alias="LLM_ENABLED")

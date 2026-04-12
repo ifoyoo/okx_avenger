@@ -4,6 +4,17 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0023 - 通知模块收口为 runtime notification center
+- 背景：`core/utils/notifications.py` 里虽然有 Telegram 推送代码，但主运行链路从未构建或调用它；README 与配置面却一直把通知描述成已接入。
+- 决策：
+  - 将通知模块重构为围绕 `run_once/run` 结果工作的 `NotificationCenter`，统一处理级别过滤、冷却键和消息渲染。
+  - Telegram 只保留为 transport，不再把 `send(message)` 原始接口当成业务 API。
+  - 当前只支持四类事件：`runtime_error`、`trade_blocked`、`order_failed`、`order_submitted`。
+  - `NOTIFY_LEVEL` 明确定义为：`critical` = 异常/阻断/失败，`orders` = 再加成功下单，`all` 当前等同 `orders`。
+- 原因：与其保留一个“存在但没人用”的通知模块，不如把它收口到项目真实主线，让配置、README 和运行行为重新一致。
+- 影响：Telegram 推送现在真的由 runtime workflow 驱动；`config-check` 会显示通知开关和级别；后续扩展新渠道时只需新增 transport，不必再改运行链路判断。
+- 回滚方案：如未来决定完全放弃 Telegram，可保留 `NotificationCenter` 事件契约，仅替换 transport；不恢复旧的悬空 `send(message)` 用法。
+
 ### 2026-04-12 - D0022 - 清理死配置并让 `FEATURE_LIMIT` 真正控制运行默认值
 - 背景：用户检查 `.env` 时发现运行参数很多，但其中 `PROTECTION_MONITOR_INTERVAL_SECONDS` 并未接入主链路；同时 `FEATURE_LIMIT` 虽存在于配置模型中，却没有真正驱动 `once/run` 的 CLI 默认 `--limit`。
 - 决策：

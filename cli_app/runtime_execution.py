@@ -15,8 +15,89 @@ from cli_app.runtime_helpers import (
     _safe_account_snapshot,
 )
 from core.engine.execution import ExecutionPlan
-from core.models import TradeSignal
+from core.models import SignalAction, TradeSignal
 from core.strategy.plugins import format_plugin_snapshot
+from core.utils import NotificationEvent
+
+
+def _publish_runtime_error(bundle: RuntimeBundle, *, inst_id: str, timeframe: str, detail: str) -> None:
+    notifier = getattr(bundle, "notifier", None)
+    if notifier is None:
+        return
+    notifier.publish(
+        NotificationEvent(
+            kind="runtime_error",
+            inst_id=inst_id,
+            timeframe=timeframe,
+            message=f"[{inst_id} {timeframe}] runtime_error: {detail}",
+        )
+    )
+
+
+def _publish_runtime_result(
+    bundle: RuntimeBundle,
+    *,
+    inst_id: str,
+    timeframe: str,
+    dry_run: bool,
+    signal: TradeSignal,
+    plan: Optional[ExecutionPlan],
+    execution_report: Optional[object],
+    order: Optional[dict],
+) -> None:
+    notifier = getattr(bundle, "notifier", None)
+    if notifier is None:
+        return
+    if signal.action == SignalAction.HOLD:
+        return
+    if plan and plan.blocked and plan.block_reason:
+        notifier.publish(
+            NotificationEvent(
+                kind="trade_blocked",
+                inst_id=inst_id,
+                timeframe=timeframe,
+                message=(
+                    f"[{inst_id} {timeframe}] {signal.action.value.upper()} blocked "
+                    f"conf={signal.confidence:.2f} reason={plan.block_reason}"
+                ),
+            )
+        )
+        return
+    if dry_run:
+        return
+    success = bool(getattr(execution_report, "success", False))
+    if success:
+        notifier.publish(
+            NotificationEvent(
+                kind="order_submitted",
+                inst_id=inst_id,
+                timeframe=timeframe,
+                message=(
+                    f"[{inst_id} {timeframe}] order_submitted "
+                    f"{signal.action.value.upper()} conf={signal.confidence:.2f} size={signal.size:.6f}"
+                ),
+            )
+        )
+        return
+    error_text = str(getattr(execution_report, "error", "") or "")
+    code_text = str(getattr(execution_report, "code", "") or "")
+    if isinstance(order, dict) and not error_text:
+        error_info = order.get("error") if isinstance(order.get("error"), dict) else {}
+        if error_info:
+            error_text = str(error_info.get("message") or "")
+            code_text = code_text or str(error_info.get("code") or "")
+    if error_text or code_text:
+        notifier.publish(
+            NotificationEvent(
+                kind="order_failed",
+                inst_id=inst_id,
+                timeframe=timeframe,
+                message=(
+                    f"[{inst_id} {timeframe}] order_failed {signal.action.value.upper()} "
+                    f"code={code_text or '-'} msg={error_text or '-'}"
+                ),
+            )
+        )
 
 
 def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
@@ -61,10 +142,12 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
             )
         except Exception as exc:
             logger.error("[{} {}] 执行失败: {}", inst_id, timeframe, exc)
+            _publish_runtime_error(bundle, inst_id=inst_id, timeframe=timeframe, detail=str(exc))
             continue
 
         signal: TradeSignal = result["signal"]
         plan: Optional[ExecutionPlan] = (result.get("execution") or {}).get("plan")
+        report = (result.get("execution") or {}).get("report")
         brain = result.get("analysis_brain")
         intel = result.get("market_intel")
         brain_text = ""
@@ -84,6 +167,16 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
             _fmt_plan(plan),
             brain_text,
             intel_text,
+        )
+        _publish_runtime_result(
+            bundle,
+            inst_id=inst_id,
+            timeframe=timeframe,
+            dry_run=bool(args.dry_run),
+            signal=signal,
+            plan=plan,
+            execution_report=report,
+            order=result.get("order"),
         )
         success += 1
     logger.info("本轮结束：{}/{} 成功完成", success, len(entries))

@@ -12,7 +12,7 @@
 - **客观指标融合**：`core/strategy/core.py` 将 RSI/EMA/MACD/Bollinger/ATR 等客观指标、市场分析、波动/流动性过滤及 PositionSizer 组合成可执行信号。
 - **三层风控 + 精细执行**：`core/engine/risk.py`（账户/品种/信号）、`core/engine/execution.py`（合约规格、止盈止损附带、滑点控制）、`core/data/performance.py`（近期盈亏快照）闭环。
 - **手动 watchlist**：运行标的完全由 `watchlist.json` 管理；字符串条目默认使用 `5m + 1H`，也支持按标的覆盖周期、仓位和情报别名。
-- **可观测性完备**：Rich 控制台、Loguru 滚动日志、决策记录、`data/perf_cache.json` 绩效缓存、Telegram 冷却通知全可追溯。
+- **可观测性完备**：CLI 控制台、Loguru 滚动日志、决策记录、`data/perf_cache.json` 绩效缓存、Telegram 冷却通知全可追溯。
 
 ---
 
@@ -76,7 +76,7 @@
 | `core/data/performance.py` | 最近 N 天成交抓取、盈亏/胜率/手续费统计缓存。 |
 | `core/data/watchlist_loader.py` | 手动 watchlist 解析、默认周期补全与运行期热加载。 |
 | `core/client/stream.py` | WebSocket 缓存 K 线/盘口/成交，REST 不足时自动回退。 |
-| `core/utils/notifications.py` | Telegram 冷却推送。 |
+| `core/utils/notifications.py` | 运行链路通知中心：级别过滤、冷却键与 Telegram 传输。 |
 | `data/` | `perf_cache.json` 等运行时缓存。 |
 | `logs/` | 滚动日志、决策记录、运行日志。 |
 
@@ -126,7 +126,7 @@ LOG_DIR=logs
 
 # ---- Notification ----
 NOTIFY_ENABLED=false
-NOTIFY_LEVEL=critical          ; critical / orders / all
+NOTIFY_LEVEL=critical          ; critical=异常/阻断/失败，orders=再加成功下单，all 当前等同 orders
 NOTIFY_COOLDOWN_SECONDS=600
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
@@ -279,7 +279,7 @@ Watchlist 现在只保留手动模式，直接维护 `watchlist.json`：
 | 风控层 | `core/engine/risk.py` | - 账户层：交易所风控标志、可用资金占比<br>- 品种层：成交量不足、近期波动超阈值、风险提示<br>- 信号层：多周期方向冲突 → 直接 HOLD，并把原因拼入 `TradeSignal.reason`。 |
 | 执行层 | `core/engine/execution.py` | - OKX instruments 缓存合约规格；自动折算 underlying ↔ contracts<br>- 根据 ATR/价格估计滑点，0.01 内 + 高置信使用限价单减少冲击<br>- 提前判定最小张数/最小下单不满足时抬升或阻断<br>- 构造 `attachAlgoOrds` 添加止盈止损。 |
 | 账户评估 | `core/data/performance.py` | 后台线程每 15 min 刷新最近 7 日成交，统计 P/L、胜率、手续费、样本数，并在控制台/通知中展示。 |
-| 通知/展示 | `core/utils/notifications.py`, `cli_app/runtime_*` | CLI 日志输出、状态视图、heartbeat 与 Telegram 冷却策略（事件类型 × inst_id 键值对）。 |
+| 通知/展示 | `core/utils/notifications.py`, `cli_app/runtime_*` | CLI 日志输出、状态视图、heartbeat，以及围绕 runtime 结果的 Telegram 通知中心（异常/阻断/下单成功失败）。 |
 
 ---
 
@@ -299,7 +299,7 @@ Watchlist 现在只保留手动模式，直接维护 `watchlist.json`：
 
 1. **Dry-Run 仿真**：使用 `./okx once --dry-run` 或 `./okx run --dry-run`。
 2. **扩充指标/特征**：在 `core/data/features.py` 添加自定义列，再在 `core/strategy/core.py` 消费；`build_market_summary` 会自动纳入文本描述。
-3. **新增通知渠道**：扩展 `core/utils/notifications.py`，并在 CLI workflow 中接入新的通知调用点。
+3. **新增通知渠道**：扩展 `core/utils/notifications.py` 的 transport 层，并保持 `NotificationCenter` 的事件契约不变。
 4. **接管 watchlist**：直接用 Git 管理 `watchlist.json`。
 5. **限制资金/杠杆**：通过 `.env` 中 `BALANCE_USAGE_RATIO`、`DEFAULT_LEVERAGE`、`DEFAULT_MAX_POSITION` 控制上限，并结合 watchlist 的 `max_position` 精细调节。
 6. **手动触发一轮扫描**：运行 `./okx once`；若只想验证链路，优先使用 `./okx once --dry-run`。
@@ -313,7 +313,7 @@ Watchlist 现在只保留手动模式，直接维护 `watchlist.json`：
 | **订单被阻断** | 查看控制台的执行计划/执行反馈面板：可能是资金不足、最小下单限制、滑点超阈值或 RiskManager 拦截。 |
 | **WebSocket 无法建立** | `core/client/stream.py` 会捕获异常并回退 REST，只要安装 `websocket-client` 即可。若网络屏蔽 8443 端口，需配置代理 (`HTTP_PROXY`)。 |
 | **性能统计始终为空** | 账户近 7 天无成交、API Key 无读成交权限或所在账户类型不支持 `get_fills`。可调用 `PerformanceTracker.get_snapshot_for_days(1)` 检查。 |
-| **通知频率太高** | `NOTIFY_LEVEL=critical` 仅推失败/阻断；`orders` 包含成功订单；`NOTIFY_COOLDOWN_SECONDS` 控制事件冷却。 |
+| **通知频率太高** | `NOTIFY_LEVEL=critical` 仅推运行异常、阻断和下单失败；`orders`/`all` 再加成功下单；`NOTIFY_COOLDOWN_SECONDS` 按 `事件类型 × inst_id@timeframe` 做冷却。 |
 | **运行一段时间后占用高** | 优先检查 watchlist 大小、日志量和 WebSocket/REST 使用情况；当前常驻入口是 `./okx run`，不再存在旧 `main.py` 调度路径。 |
 
 ---

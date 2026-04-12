@@ -25,7 +25,8 @@ def test_run_runtime_once_writes_running_and_idle_heartbeat(monkeypatch) -> None
     workflows = _load_workflows()
     writes = []
     bundle = SimpleNamespace(
-        settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json"))
+        notifier=SimpleNamespace(publish=lambda event: writes.append({"event": event})),
+        settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json")),
     )
 
     monkeypatch.setattr(workflows, "_write_runtime_heartbeat", lambda **kwargs: writes.append(kwargs))
@@ -41,6 +42,28 @@ def test_run_runtime_once_writes_running_and_idle_heartbeat(monkeypatch) -> None
     assert writes[2]["status"] == "idle"
     assert writes[2]["exit_code"] == 7
     assert writes[2]["cycle"] == 1
+
+
+def test_run_runtime_once_notifies_runtime_error(monkeypatch) -> None:
+    workflows = _load_workflows()
+    bundle = SimpleNamespace(
+        notifier=SimpleNamespace(events=[], publish=lambda event: bundle.notifier.events.append(event)),
+        settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json")),
+    )
+
+    monkeypatch.setattr(workflows, "_write_runtime_heartbeat", lambda **kwargs: None)
+    monkeypatch.setattr(workflows, "log_strategy_snapshot", lambda current: None)
+    monkeypatch.setattr(workflows, "run_runtime_cycle", lambda current, args: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    try:
+        workflows.run_runtime_once(bundle, argparse.Namespace())
+    except RuntimeError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("expected runtime error")
+
+    assert len(bundle.notifier.events) == 1
+    assert bundle.notifier.events[0].kind == "runtime_error"
 
 
 def test_show_runtime_status_prints_sections(monkeypatch, capsys) -> None:

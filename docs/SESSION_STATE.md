@@ -5,8 +5,8 @@
 ## 元信息
 - 最后更新时间：2026-04-12
 - 当前主线：按 `docs/NODES.md` 推进
-- 当前批次：四阶段策略/分析质量提升已完成，watchlist 已收口为 manual-only，TP/SL 语义已统一到规则解析链路
-- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；当前回到可交付状态下的观测与参数微调
+- 当前批次：四阶段策略/分析质量提升已完成，watchlist 已收口为 manual-only，TP/SL 语义已统一到规则解析链路，通知模块已接回 runtime 主链路
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；当前回到可交付状态下的观测与参数微调
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
@@ -29,6 +29,32 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-12
+- 节点：通知模块重构 - runtime notification center
+- 目标：把悬空的 Telegram 通知代码收口到当前真实运行链路，统一异常/阻断/下单结果的通知语义。
+- 结果：完成。`NotificationCenter` 现统一处理级别过滤、冷却与事件渲染；`build_runtime()` 会真实构建通知中心；`run_runtime_cycle()` 会在 per-inst 失败、阻断、真实下单成功/失败时发通知；`run_runtime_once()/run_runtime_loop()` 会在顶层运行异常时补发 `runtime_error`。`config-check` 现在也会显示 `notify_enabled/notify_level`。
+- 变更文件：
+  - `core/utils/notifications.py`
+  - `core/utils/__init__.py`
+  - `cli_app/context.py`
+  - `cli_app/runtime_execution.py`
+  - `cli_app/runtime_workflows.py`
+  - `cli_app/config_reporting.py`
+  - `config/settings.py`
+  - `tests/test_notifications.py`
+  - `tests/test_cli_runtime_cycle.py`
+  - `tests/test_cli_runtime_workflows.py`
+  - `tests/test_cli_config_reporting.py`
+  - `tests/test_cli_config_workflows.py`
+  - `tests/test_settings_validation.py`
+  - `README.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_notifications.py tests/test_cli_runtime_cycle.py tests/test_cli_runtime_workflows.py tests/test_settings_validation.py` -> `19 passed`
+  - `.venv/bin/python -m pytest -q tests/test_cli_config_reporting.py tests/test_cli_config_workflows.py tests/test_notifications.py tests/test_cli_runtime_cycle.py tests/test_cli_runtime_workflows.py tests/test_settings_validation.py` -> `26 passed`
+
 - 时间：2026-04-12
 - 节点：配置面优化 - 删除死配置并收紧默认运行参数
 - 目标：回答“这些 `.env` 项到底有没有用”，并把当前真正生效的运行参数收敛到可解释、可用的范围。

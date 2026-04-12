@@ -13,6 +13,7 @@ from core.data.performance import PerformanceTracker
 from core.data.watchlist_loader import WatchlistManager
 from core.engine.trading import TradingEngine
 from core.strategy.core import Strategy
+from core.utils import NotificationCenter, build_notification_center
 
 
 @dataclass
@@ -22,6 +23,7 @@ class RuntimeBundle:
     engine: TradingEngine
     watchlist_manager: WatchlistManager
     perf_tracker: PerformanceTracker
+    notifier: NotificationCenter | None
 
     def close(self) -> None:
         try:
@@ -57,10 +59,19 @@ def build_runtime() -> RuntimeBundle:
     engine = TradingEngine(okx, analyzer, strategy, settings, market_stream=None)
     watchlist_manager = WatchlistManager(okx, settings)
     perf_tracker = PerformanceTracker(okx)
+    notifier = build_notification_center(
+        enabled=settings.notification.enabled,
+        bot_token=settings.notification.telegram_bot_token,
+        chat_id=settings.notification.telegram_chat_id,
+        api_url=settings.notification.telegram_api_url,
+        level=settings.notification.level,
+        cooldown_seconds=settings.notification.cooldown_seconds,
+    )
     return RuntimeBundle(
         settings=settings,
         okx=okx,
         engine=engine,
         watchlist_manager=watchlist_manager,
         perf_tracker=perf_tracker,
+        notifier=notifier,
     )

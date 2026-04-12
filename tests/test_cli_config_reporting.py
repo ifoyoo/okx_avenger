@@ -19,6 +19,7 @@ def _settings(*, llm_enabled=False, news_enabled=False):
         account=SimpleNamespace(okx_base_url="https://www.okx.com"),
         runtime=SimpleNamespace(run_interval_minutes=5),
         strategy=SimpleNamespace(default_leverage=3),
+        notification=SimpleNamespace(enabled=False, level="critical"),
         llm=SimpleNamespace(enabled=llm_enabled, model="gpt-x", api_base="https://api.example.com"),
         intel=SimpleNamespace(
             news_enabled=news_enabled,
@@ -44,6 +45,8 @@ def test_format_config_summary_lines_without_optional_sections() -> None:
         "- base_url: https://www.okx.com",
         "- run_interval_minutes: 5",
         "- default_leverage: 3",
+        "- notify_enabled: False",
+        "- notify_level: critical",
         "- llm_enabled: False",
         "- news_enabled: False",
     ]

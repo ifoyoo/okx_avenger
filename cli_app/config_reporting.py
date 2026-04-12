@@ -7,6 +7,8 @@ def format_config_summary_lines(settings) -> list[str]:
         f"- base_url: {settings.account.okx_base_url}",
         f"- run_interval_minutes: {settings.runtime.run_interval_minutes}",
         f"- default_leverage: {settings.strategy.default_leverage}",
+        f"- notify_enabled: {settings.notification.enabled}",
+        f"- notify_level: {settings.notification.level}",
         f"- llm_enabled: {settings.llm.enabled}",
     ]
     if settings.llm.enabled:

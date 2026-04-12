@@ -41,6 +41,12 @@ def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
     assert not hasattr(runtime, "protection_monitor_interval_seconds")
 
 
+def test_notification_settings_normalize_level() -> None:
+    settings = NotificationSettings(NOTIFY_LEVEL="ORDERS")
+
+    assert settings.level == "orders"
+
+
 def test_build_and_dump_config_snapshot(tmp_path) -> None:
     runtime = RuntimeSettings(CONFIG_SNAPSHOT_PATH=str(tmp_path / "snapshot.json"))
     settings = AppSettings(

@@ -29,6 +29,7 @@ def _settings(*, missing=False, llm_enabled=False, news_enabled=False):
             config_snapshot_path="data/config.snapshot.json",
         ),
         strategy=SimpleNamespace(default_leverage=3),
+        notification=SimpleNamespace(enabled=True, level="orders"),
         llm=SimpleNamespace(enabled=llm_enabled, model="gpt-x", api_base="https://api.example.com"),
         intel=SimpleNamespace(
             news_enabled=news_enabled,
@@ -62,6 +63,8 @@ def test_run_config_check_prints_snapshot_and_skips_api_check(monkeypatch, capsy
 
     output = capsys.readouterr().out
     assert "✅ 本地配置字段完整。" in output
+    assert "- notify_enabled: True" in output
+    assert "- notify_level: orders" in output
     assert "- llm_model: gpt-x" in output
     assert "- news_provider: newsapi" in output
     assert "- config_snapshot: data/snapshot.json" in output

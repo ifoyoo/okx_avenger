@@ -21,6 +21,14 @@ from cli_app.runtime_status_helpers import (
     _format_position_lines,
     _format_watchlist_lines,
 )
+from core.utils import NotificationEvent
+
+
+def _notify_runtime_failure(bundle: RuntimeBundle, *, detail: str) -> None:
+    notifier = getattr(bundle, "notifier", None)
+    if notifier is None:
+        return
+    notifier.publish(NotificationEvent(kind="runtime_error", message=f"[runtime] {detail}"))
 
 
 def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
@@ -33,6 +41,7 @@ def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         return exit_code
     except Exception as exc:
         _write_runtime_heartbeat(path=heartbeat_path, status="error", cycle=1, exit_code=2, detail=str(exc))
+        _notify_runtime_failure(bundle, detail=str(exc))
         raise
 
 
@@ -59,6 +68,7 @@ def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         return 0
     except Exception as exc:
         _write_runtime_heartbeat(path=heartbeat_path, status="error", cycle=cycle, exit_code=2, detail=str(exc))
+        _notify_runtime_failure(bundle, detail=str(exc))
         raise
 
 

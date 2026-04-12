@@ -78,9 +78,18 @@ class _FakePerfTracker:
         return {"trades": 1}
 
 
+class _FakeNotifier:
+    def __init__(self):
+        self.events = []
+
+    def publish(self, event):
+        self.events.append(event)
+
+
 def _make_bundle(entries, *, failing_inst_ids=()):
     return SimpleNamespace(
         engine=_FakeEngine(failing_inst_ids=failing_inst_ids),
+        notifier=_FakeNotifier(),
         perf_tracker=_FakePerfTracker(),
         watchlist_manager=_FakeWatchlistManager(entries),
         settings=SimpleNamespace(
@@ -165,3 +174,78 @@ def test_log_strategy_snapshot_ignores_missing_manager() -> None:
     bundle = SimpleNamespace(engine=SimpleNamespace(strategy=SimpleNamespace()))
 
     assert runtime_execution.log_strategy_snapshot(bundle) is None
+
+
+def test_run_runtime_cycle_sends_blocked_notification() -> None:
+    runtime_execution = _load_runtime_execution()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}])
+
+    def _blocked_run_once(**kwargs):
+        bundle.engine.calls.append(kwargs)
+        return {
+            "signal": TradeSignal(
+                action=SignalAction.BUY,
+                confidence=0.82,
+                reason="blocked",
+                size=0.1,
+            ),
+            "execution": {
+                "plan": ExecutionPlan(
+                    inst_id=kwargs["inst_id"],
+                    action=SignalAction.BUY,
+                    td_mode="cross",
+                    pos_side="long",
+                    order_type="limit",
+                    size=0.1,
+                    price=None,
+                    est_slippage=0.001,
+                    blocked=True,
+                    block_reason="risk blocked",
+                )
+            },
+            "order": None,
+        }
+
+    bundle.engine.run_once = _blocked_run_once
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args()) == 0
+    assert len(bundle.notifier.events) == 1
+    assert bundle.notifier.events[0].kind == "trade_blocked"
+    assert bundle.notifier.events[0].inst_id == "BTC-USDT-SWAP"
+
+
+def test_run_runtime_cycle_sends_order_submitted_notification() -> None:
+    runtime_execution = _load_runtime_execution()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}])
+
+    def _success_run_once(**kwargs):
+        bundle.engine.calls.append(kwargs)
+        return {
+            "signal": TradeSignal(
+                action=SignalAction.BUY,
+                confidence=0.82,
+                reason="submitted",
+                size=0.1,
+            ),
+            "execution": {
+                "plan": ExecutionPlan(
+                    inst_id=kwargs["inst_id"],
+                    action=SignalAction.BUY,
+                    td_mode="cross",
+                    pos_side="long",
+                    order_type="limit",
+                    size=0.1,
+                    price=None,
+                    est_slippage=0.001,
+                    blocked=False,
+                ),
+                "report": SimpleNamespace(success=True, error=None, code=None),
+            },
+            "order": {"code": "0"},
+        }
+
+    bundle.engine.run_once = _success_run_once
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
+    assert len(bundle.notifier.events) == 1
+    assert bundle.notifier.events[0].kind == "order_submitted"
