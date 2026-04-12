@@ -8,12 +8,10 @@ from config.settings import get_settings
 
 from cli_app.backtest_execution import collect_backtest_records, collect_tuning_snapshot
 from cli_app.backtest_helpers import (
-    BACKTEST_LATEST,
-    _load_backtest_records,
     _print_backtest_summary,
-    _save_backtest_records,
 )
 from cli_app.backtest_reporting import format_trade_lines, format_tune_lines
+from cli_app.backtest_storage import BACKTEST_LATEST, _load_backtest_records, _save_backtest_records
 from cli_app.context import RuntimeBundle
 from cli_app.runtime_helpers import _resolve_entries, _safe_account_snapshot
 from cli_app.strategy_config_helpers import (
