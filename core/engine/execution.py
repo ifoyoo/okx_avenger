@@ -11,7 +11,8 @@ import uuid
 from loguru import logger
 
 from core.client import OKXClient
-from core.models import ProtectionTarget, SignalAction, TradeProtection, TradeSignal
+from core.models import ProtectionTarget, ResolvedTradeProtection, SignalAction, TradeSignal
+from core.protection import resolve_trade_protection
 
 MAX_SLIPPAGE_PCT = 0.02
 LIMIT_OFFSET_RATIO = 0.001
@@ -46,7 +47,7 @@ class ExecutionPlan:
     notes: Tuple[str, ...] = ()
     blocked: bool = False
     block_reason: Optional[str] = None
-    protection: Optional[TradeProtection] = None
+    protection: Optional[ResolvedTradeProtection] = None
     latest_price: Optional[float] = None
     cl_ord_id: Optional[str] = None
 
@@ -126,7 +127,16 @@ class ExecutionEngine:
                     f"预估滑点 {est_slippage:.2%} 超出阈值 {self.max_slippage_pct:.2%}，暂停执行。"
                 )
 
+        resolved_protection = None
         if signal.protection and not blocked:
+            entry_reference = price if order_type == "limit" and price and price > 0 else latest_price
+            resolved_protection = resolve_trade_protection(
+                protection=signal.protection,
+                action=signal.action,
+                entry_price=entry_reference,
+                atr=atr,
+            )
+        if resolved_protection and not blocked:
             notes.append("附带止盈/止损保护。")
         if min_contract_note and not blocked:
             notes.append(min_contract_note)
@@ -149,7 +159,7 @@ class ExecutionEngine:
             notes=tuple(notes),
             blocked=blocked,
             block_reason=block_reason,
-            protection=signal.protection if not blocked else None,
+            protection=resolved_protection if not blocked else None,
             latest_price=latest_price,
             cl_ord_id=cl_ord_id,
         )
@@ -295,7 +305,7 @@ class ExecutionEngine:
         return raw[:32]
 
     def _build_attach_algo_orders(
-        self, protection: Optional[TradeProtection]
+        self, protection: Optional[ResolvedTradeProtection]
     ) -> Optional[List[Dict[str, str]]]:
         if not protection:
             return None

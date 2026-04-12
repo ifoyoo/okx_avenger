@@ -259,9 +259,11 @@ Watchlist 现在只保留手动模式，直接维护 `watchlist.json`：
 
 ### 止盈止损方案
 
-- **触发行权**：策略输出的保护位统一归一到 `core.models.ProtectionTarget`，当 `mode=percent` 时，仅提供 `trigger_ratio`，交由执行层转成 OKX 文档所述的 `tpTriggerRatio/slTriggerRatio`（参见 [POST /api/v5/trade/place-order](https://www.okx.com/docs-v5/zh/#rest-api-trade-place-order) 中 `attachAlgoOrds` 参数说明），并强制 `order_type=market`，保证触发后直接以市价平仓。
-- **ATR/Price**：`mode=atr/price` 只提供具体价位，执行层转成 `tpTriggerPx/slTriggerPx`，若配合限价委托则会将 `order_px` 带入 `tpOrdPx/slOrdPx`，否则下发 `-1` 市价。触发价类型默认 `last`，可在 watchlist 覆盖。
-- **执行流程**：`core.engine.execution.ExecutionEngine._build_attach_algo_orders` 会优先写入比例触发字段，且附带 `tpOrdKind/slOrdKind`，符合同一订单仅允许单向止盈止损的官方限制。一旦 `trigger_ratio/trigger_px` 命中，OKX 会立即创建 reduce-only 委托，从而实现“达到比例立即平仓”的需求。
+- **统一契约**：`watchlist.json` / 默认配置里写的是 `ProtectionRule`，`TradeSignal.protection` 也只保留规则意图；真正的触发位由 `core.protection.resolve_trade_protection()` 在执行层和回测层按入场价统一解析，不再各自拼一套 TP/SL 语义。
+- **支持模式**：`mode=percent/price/atr/rr`。其中 `ratio/pct/percentage` 会自动归一到 `percent`；`rr` 只用于止盈，表示以已解析止损距离为 `1R`，例如 `stop_loss=1%` + `take_profit=2R` 会得到 `2%` 止盈。
+- **Percent**：解析后同时保留 `trigger_ratio` 和 `trigger_px`。执行层会优先下发 OKX 的 `tpTriggerRatio/slTriggerRatio`，让百分比保护围绕实际成交价工作；回测层则消费同一个规则解析出的绝对价格。
+- **ATR / Price / RR**：这些模式解析成具体价位，执行层转成 `tpTriggerPx/slTriggerPx`；若 `order_type=limit` 则会带入 `tpOrdPx/slOrdPx`，否则下发 `-1` 市价。触发价类型默认 `last`，可在 watchlist 覆盖。
+- **回测语义**：回测开仓后会在同一根执行 bar 内检查 TP/SL；若同一根 K 线同时触发止盈和止损，默认按保守原则先记止损，从而避免把未知的 intrabar 顺序高估成收益。
 
 ---
 

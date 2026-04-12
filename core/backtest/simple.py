@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from core.models import SignalAction, StrategyContext
+from core.models import ResolvedTradeProtection, SignalAction, StrategyContext, TradeSignal
+from core.protection import resolve_trade_protection
 from core.strategy.core import Strategy
 
 
@@ -98,6 +99,107 @@ def _execution_price(
     return raw_price
 
 
+def _open_position(
+    *,
+    signal: TradeSignal,
+    bar: pd.Series,
+    entry_idx: int,
+    atr: float,
+    slippage_ratio: float,
+    spread_ratio: float,
+) -> Optional[Dict[str, Any]]:
+    raw_entry = float(bar.get("open", 0.0) or bar.get("close", 0.0) or 0.0)
+    if raw_entry <= 0:
+        return None
+    entry_exec = _execution_price(
+        raw_price=raw_entry,
+        side=signal.action,
+        is_entry=True,
+        slippage_ratio=slippage_ratio,
+        spread_ratio=spread_ratio,
+    )
+    protection = resolve_trade_protection(
+        protection=signal.protection,
+        action=signal.action,
+        entry_price=entry_exec,
+        atr=atr,
+    )
+    return {
+        "side": signal.action,
+        "qty": float(signal.size),
+        "entry_price": entry_exec,
+        "entry_idx": entry_idx,
+        "entry_ts": _safe_ts(bar.get("ts")),
+        "reason_entry": signal.reason.splitlines()[0] if signal.reason else signal.action.value,
+        "protection": protection,
+    }
+
+
+def _protection_exit(
+    *,
+    position: Dict[str, Any],
+    bar: pd.Series,
+) -> Optional[Dict[str, Any]]:
+    protection = position.get("protection")
+    if not isinstance(protection, ResolvedTradeProtection):
+        return None
+    tp = protection.take_profit.trigger_px if protection.take_profit and protection.take_profit.has_price() else None
+    sl = protection.stop_loss.trigger_px if protection.stop_loss and protection.stop_loss.has_price() else None
+    if tp is None and sl is None:
+        return None
+
+    high = float(bar.get("high", 0.0) or bar.get("close", 0.0) or 0.0)
+    low = float(bar.get("low", 0.0) or bar.get("close", 0.0) or 0.0)
+    side = position["side"]
+    if side == SignalAction.BUY:
+        sl_hit = sl is not None and low <= sl
+        tp_hit = tp is not None and high >= tp
+    else:
+        sl_hit = sl is not None and high >= sl
+        tp_hit = tp is not None and low <= tp
+
+    if sl_hit:
+        return {"reason_exit": "stop_loss", "exit_price": float(sl)}
+    if tp_hit:
+        return {"reason_exit": "take_profit", "exit_price": float(tp)}
+    return None
+
+
+def _close_position(
+    *,
+    position: Dict[str, Any],
+    exit_price: float,
+    exit_ts: Any,
+    reason_exit: str,
+    inst_id: str,
+    timeframe: str,
+    fee_rate: float,
+) -> Dict[str, Any]:
+    qty = float(position["qty"])
+    entry_price = float(position["entry_price"])
+    gross = _pnl(position["side"], qty, entry_price, exit_price)
+    fee = (entry_price + exit_price) * qty * max(0.0, fee_rate)
+    net = gross - fee
+    bars_held = max(0, int(position.get("exit_idx", position["entry_idx"])) - int(position["entry_idx"]))
+    trade = BacktestTrade(
+        inst_id=inst_id,
+        timeframe=timeframe,
+        side=position["side"].value,
+        qty=qty,
+        entry_ts=str(position["entry_ts"]),
+        exit_ts=_safe_ts(exit_ts),
+        entry_price=entry_price,
+        exit_price=exit_price,
+        bars_held=bars_held,
+        reason_entry=str(position["reason_entry"]),
+        reason_exit=reason_exit,
+        gross_pnl=gross,
+        fee=fee,
+        net_pnl=net,
+    )
+    return {"trade": trade, "net": net}
+
+
 def run_backtest_from_features(
     *,
     strategy: Strategy,
@@ -144,104 +246,86 @@ def run_backtest_from_features(
             available_balance=equity,
         )
         signal = strategy.generate_signal(context, hist, analysis_text, None).trade_signal
+        signal_atr = float(hist.iloc[-1].get("atr", 0.0) or 0.0)
 
-        if position is None:
-            if signal.action in (SignalAction.BUY, SignalAction.SELL) and signal.size > 0:
-                entry_exec = _execution_price(
+        if position is not None:
+            held = (i + 1) - int(position["entry_idx"])
+            close_now = False
+            reason_exit = ""
+
+            if signal.action in (SignalAction.BUY, SignalAction.SELL) and signal.action != position["side"] and signal.size > 0:
+                close_now = True
+                reason_exit = "opposite_signal"
+            elif held >= max_hold_bars:
+                close_now = True
+                reason_exit = "max_hold_bars"
+
+            if close_now:
+                exit_exec = _execution_price(
                     raw_price=next_open,
-                    side=signal.action,
-                    is_entry=True,
+                    side=position["side"],
+                    is_entry=False,
                     slippage_ratio=slippage_ratio,
                     spread_ratio=spread_ratio,
                 )
-                position = {
-                    "side": signal.action,
-                    "qty": float(signal.size),
-                    "entry_price": entry_exec,
-                    "entry_idx": i + 1,
-                    "entry_ts": _safe_ts(next_bar.get("ts")),
-                    "reason_entry": signal.reason.splitlines()[0] if signal.reason else signal.action.value,
-                }
-            continue
+                position["exit_idx"] = i + 1
+                closed = _close_position(
+                    position=position,
+                    exit_price=exit_exec,
+                    exit_ts=next_bar.get("ts"),
+                    reason_exit=reason_exit,
+                    inst_id=inst_id,
+                    timeframe=timeframe,
+                    fee_rate=fee_rate,
+                )
+                equity += float(closed["net"])
+                trades.append(closed["trade"])
+                equity_curve.append(equity)
+                peak = max(peak, equity)
+                if peak > 0:
+                    dd = (peak - equity) / peak
+                    max_drawdown = max(max_drawdown, dd)
+                position = None
 
-        held = (i + 1) - int(position["entry_idx"])
-        close_now = False
-        reason_exit = ""
-
-        if signal.action in (SignalAction.BUY, SignalAction.SELL) and signal.action != position["side"] and signal.size > 0:
-            close_now = True
-            reason_exit = "opposite_signal"
-        elif held >= max_hold_bars:
-            close_now = True
-            reason_exit = "max_hold_bars"
-
-        if not close_now:
-            continue
-
-        qty = float(position["qty"])
-        entry_price = float(position["entry_price"])
-        exit_exec = _execution_price(
-            raw_price=next_open,
-            side=position["side"],
-            is_entry=False,
-            slippage_ratio=slippage_ratio,
-            spread_ratio=spread_ratio,
-        )
-        gross = _pnl(position["side"], qty, entry_price, exit_exec)
-        fee = (entry_price + exit_exec) * qty * max(0.0, fee_rate)
-        net = gross - fee
-        equity += net
-
-        trades.append(
-            BacktestTrade(
-                inst_id=inst_id,
-                timeframe=timeframe,
-                side=position["side"].value,
-                qty=qty,
-                entry_ts=str(position["entry_ts"]),
-                exit_ts=_safe_ts(next_bar.get("ts")),
-                entry_price=entry_price,
-                exit_price=exit_exec,
-                bars_held=held,
-                reason_entry=str(position["reason_entry"]),
-                reason_exit=reason_exit,
-                gross_pnl=gross,
-                fee=fee,
-                net_pnl=net,
+        if position is None and signal.action in (SignalAction.BUY, SignalAction.SELL) and signal.size > 0:
+            position = _open_position(
+                signal=signal,
+                bar=next_bar,
+                entry_idx=i + 1,
+                atr=signal_atr,
+                slippage_ratio=slippage_ratio,
+                spread_ratio=spread_ratio,
             )
-        )
 
+        if position is None:
+            continue
+
+        protection_exit = _protection_exit(position=position, bar=next_bar)
+        if protection_exit is None:
+            continue
+        position["exit_idx"] = i + 1
+        closed = _close_position(
+            position=position,
+            exit_price=float(protection_exit["exit_price"]),
+            exit_ts=next_bar.get("ts"),
+            reason_exit=str(protection_exit["reason_exit"]),
+            inst_id=inst_id,
+            timeframe=timeframe,
+            fee_rate=fee_rate,
+        )
+        equity += float(closed["net"])
+        trades.append(closed["trade"])
         equity_curve.append(equity)
         peak = max(peak, equity)
         if peak > 0:
             dd = (peak - equity) / peak
             max_drawdown = max(max_drawdown, dd)
-
-        if signal.action in (SignalAction.BUY, SignalAction.SELL) and signal.size > 0:
-            re_entry_exec = _execution_price(
-                raw_price=next_open,
-                side=signal.action,
-                is_entry=True,
-                slippage_ratio=slippage_ratio,
-                spread_ratio=spread_ratio,
-            )
-            position = {
-                "side": signal.action,
-                "qty": float(signal.size),
-                "entry_price": re_entry_exec,
-                "entry_idx": i + 1,
-                "entry_ts": _safe_ts(next_bar.get("ts")),
-                "reason_entry": signal.reason.splitlines()[0] if signal.reason else signal.action.value,
-            }
-        else:
-            position = None
+        position = None
 
     if position is not None:
         last_bar = features.iloc[-1]
         exit_price = float(last_bar.get("close", 0.0) or 0.0)
         if exit_price > 0:
-            qty = float(position["qty"])
-            entry_price = float(position["entry_price"])
             exit_exec = _execution_price(
                 raw_price=exit_price,
                 side=position["side"],
@@ -249,29 +333,19 @@ def run_backtest_from_features(
                 slippage_ratio=slippage_ratio,
                 spread_ratio=spread_ratio,
             )
-            gross = _pnl(position["side"], qty, entry_price, exit_exec)
-            fee = (entry_price + exit_exec) * qty * max(0.0, fee_rate)
-            net = gross - fee
-            equity += net
-            held = (len(features) - 1) - int(position["entry_idx"])
-            trades.append(
-                BacktestTrade(
-                    inst_id=inst_id,
-                    timeframe=timeframe,
-                    side=position["side"].value,
-                    qty=qty,
-                    entry_ts=str(position["entry_ts"]),
-                    exit_ts=_safe_ts(last_bar.get("ts")),
-                    entry_price=entry_price,
-                    exit_price=exit_exec,
-                    bars_held=max(0, held),
-                    reason_entry=str(position["reason_entry"]),
-                    reason_exit="end_of_data",
-                    gross_pnl=gross,
-                    fee=fee,
-                    net_pnl=net,
-                )
+            position["exit_idx"] = len(features) - 1
+            closed = _close_position(
+                position=position,
+                exit_price=exit_exec,
+                exit_ts=last_bar.get("ts"),
+                reason_exit="end_of_data",
+                inst_id=inst_id,
+                timeframe=timeframe,
+                fee_rate=fee_rate,
             )
+            net = float(closed["net"])
+            equity += net
+            trades.append(closed["trade"])
             equity_curve.append(equity)
             peak = max(peak, equity)
             if peak > 0:

@@ -10,7 +10,6 @@ from loguru import logger
 
 from core.models import (
     ProtectionRule,
-    ProtectionTarget,
     TradeProtection,
     SignalAction,
     StrategyContext,
@@ -278,9 +277,10 @@ class Strategy:
         if not tp_active and not sl_active:
             return None, None
         close = float(latest.get("close", 0.0) or 0.0)
-        atr = float(latest.get("atr", 0.0) or 0.0)
-        take_profit = self._build_target(settings.take_profit, close, atr, action, "tp")
-        stop_loss = self._build_target(settings.stop_loss, close, atr, action, "sl")
+        take_profit = self._copy_rule(settings.take_profit)
+        stop_loss = self._copy_rule(settings.stop_loss)
+        if take_profit and take_profit.normalized_mode() == "rr" and not stop_loss:
+            take_profit = None
         if not take_profit and not stop_loss:
             return None, None
         protection = TradeProtection(take_profit=take_profit, stop_loss=stop_loss)
@@ -288,52 +288,14 @@ class Strategy:
         return protection, note
 
     @staticmethod
-    def _build_target(
-        rule: ProtectionRule,
-        close: float,
-        atr: float,
-        action: SignalAction,
-        kind: str,
-    ) -> Optional[ProtectionTarget]:
+    def _copy_rule(rule: Optional[ProtectionRule]) -> Optional[ProtectionRule]:
         if not rule or not rule.is_active():
             return None
-        mode = (rule.mode or "").lower()
-        value = float(rule.value or 0.0)
-        if value <= 0 and mode != "price":
-            return None
-        direction = 1 if action == SignalAction.BUY else -1
-        sign = direction if kind == "tp" else -direction
-        trigger_px: Optional[float] = None
-        trigger_ratio: Optional[float] = None
-        order_type = (rule.order_type or "market").lower()
-        trigger_type = rule.trigger_type or "last"
-        order_kind = "limit" if order_type == "limit" else "condition"
-        if mode == "percent":
-            magnitude = abs(value)
-            if magnitude <= 0:
-                return None
-            trigger_ratio = magnitude * sign
-            order_type = "market"
-            order_kind = "condition"
-        elif mode == "atr":
-            if atr <= 0:
-                return None
-            trigger_px = close + sign * atr * value
-        elif mode == "price":
-            if value <= 0:
-                return None
-            trigger_px = value
-        else:
-            return None
-        order_px = trigger_px if (trigger_px and order_type == "limit") else None
-        return ProtectionTarget(
-            trigger_ratio=trigger_ratio,
-            trigger_px=trigger_px,
-            order_px=order_px,
-            order_type=order_type,
-            order_kind=order_kind,
-            trigger_type=trigger_type,
-            mode=mode,
+        return ProtectionRule(
+            mode=rule.normalized_mode(),
+            value=float(rule.value or 0.0),
+            trigger_type=rule.trigger_type or "last",
+            order_type=rule.order_type or "market",
         )
 
     @staticmethod
@@ -348,14 +310,19 @@ class Strategy:
         return "执行建议：" + "；".join(parts)
 
     @staticmethod
-    def _format_target_text(label: str, target: ProtectionTarget, close: float) -> str:
-        mode = target.mode or "-"
-        if target.has_ratio():
-            pct = target.trigger_ratio * 100 if target.trigger_ratio else 0.0
-            return f"{label} {pct:.1f}% ({mode})"
-        if target.has_price():
-            pct = Strategy._format_pct_diff(target.trigger_px or 0.0, close)
-            return f"{label} {(target.trigger_px or 0.0):.6f} ({mode}, {pct})"
+    def _format_target_text(label: str, rule: ProtectionRule, close: float) -> str:
+        mode = rule.normalized_mode()
+        value = float(rule.value or 0.0)
+        if mode == "percent":
+            direction = "+" if label == "止盈" else "-"
+            return f"{label} {direction}{abs(value) * 100:.1f}% ({mode})"
+        if mode == "atr":
+            return f"{label} {abs(value):.2f} ATR ({mode})"
+        if mode == "rr":
+            return f"{label} {abs(value):.2f}R ({mode})"
+        if mode == "price":
+            pct = Strategy._format_pct_diff(value, close)
+            return f"{label} {value:.6f} ({mode}, {pct})"
         return f"{label} ({mode})"
 
     @staticmethod

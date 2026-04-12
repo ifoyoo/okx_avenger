@@ -5,8 +5,8 @@
 ## 元信息
 - 最后更新时间：2026-04-12
 - 当前主线：按 `docs/NODES.md` 推进
-- 当前批次：四阶段策略/分析质量提升已完成，watchlist 已收口为 manual-only
-- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；当前回到可交付状态下的观测与参数微调
+- 当前批次：四阶段策略/分析质量提升已完成，watchlist 已收口为 manual-only，TP/SL 语义已统一到规则解析链路
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；当前回到可交付状态下的观测与参数微调
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
@@ -29,6 +29,30 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-12
+- 节点：TP/SL 重构 - 统一保护规则解析链路
+- 目标：重构止盈止损，使策略输出、执行 attach-algo 与回测退出共享同一套保护规则语义，并补上回测对保护位的真实消费。
+- 结果：完成。`TradeSignal.protection` 现只携带 `ProtectionRule`；新增 `resolve_trade_protection()` 统一按入场价/ATR 解析；支持 `rr` 止盈与 `ratio -> percent` 归一；回测开仓后会在同根执行 bar 检查 TP/SL，并输出 `take_profit` / `stop_loss` 退出原因。
+- 变更文件：
+  - `core/models/__init__.py`
+  - `core/protection.py`
+  - `core/strategy/core.py`
+  - `core/engine/execution.py`
+  - `core/backtest/simple.py`
+  - `tests/test_protection_rules.py`
+  - `tests/test_execution_clordid.py`
+  - `tests/test_backtest_simple.py`
+  - `README.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_protection_rules.py tests/test_backtest_simple.py tests/test_execution_clordid.py` -> `12 passed`
+  - `.venv/bin/python -m pytest -q tests/test_strategy_core.py tests/test_trading_pipeline.py tests/test_protection_monitor_thresholds.py tests/test_cli_runtime_cycle.py` -> `18 passed`
+  - `.venv/bin/python -m pytest -q` -> `165 passed`
+  - `./okx config-check` -> `pass`
+  - `git diff --check` -> `clean`
+
 - 时间：2026-04-12
 - 节点：配置面清理 - 移除未使用 app metadata
 - 目标：清理 `.env` 中看似重要、实际未被运行链路消费的 `APP_VERSION` / `APP_AUTHOR`，避免继续污染配置面。

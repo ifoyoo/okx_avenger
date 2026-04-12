@@ -4,6 +4,17 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0021 - 止盈止损统一为“规则意图 + 入场价解析”单一契约
+- 背景：原有 TP/SL 同时存在策略侧目标构造、执行层 attach-algo 转换和回测忽略保护的问题；`ratio` 旧写法在 watchlist 测试中出现，但主实现只认 `percent`。
+- 决策：
+  - `TradeSignal.protection` 改为携带 `ProtectionRule` 规则意图，而不是提前解析好的交易所目标。
+  - 在 `core.protection.resolve_trade_protection()` 中统一按入场参考价和 ATR 解析为 `ResolvedTradeProtection`，供执行层和回测层共用。
+  - 新增 `rr` 止盈模式，以已解析止损距离为 `1R` 计算止盈；`ratio/pct/percentage` 统一归一到 `percent`。
+  - 回测开仓后同根 bar 即检查 TP/SL，若同根同时命中止盈和止损，按保守原则先记止损。
+- 原因：先把“保护规则是什么”与“执行/回测如何落地”分层，才能让实盘和回测真正共享一套语义，并修掉旧别名漂移。
+- 影响：README 中的保护说明改为规则驱动语义；执行 attach-algo 和回测退出理由终于对齐；默认配置面不增加新入口，只增强现有 `protection` 对象表达力。
+- 回滚方案：如 `rr` 或同根 bar 保守处理不符合预期，可单独回退对应解析逻辑，但不恢复“策略直接输出交易所目标”的旧分叉。
+
 ### 2026-04-12 - D0020 - 删除未使用的 `APP_VERSION` / `APP_AUTHOR` 配置
 - 背景：`.env` 中保留了带个人化命名的 `APP_VERSION` / `APP_AUTHOR`，但当前代码除配置模型外没有任何消费点。
 - 决策：

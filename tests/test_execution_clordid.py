@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from core.engine.execution import ExecutionEngine, ExecutionPlan
-from core.models import SignalAction, TradeSignal
+from core.models import ProtectionRule, SignalAction, TradeProtection, TradeSignal
 
 
 class _DummyOKXClient:
@@ -121,3 +121,42 @@ def test_execute_pending_timeout_when_no_position(monkeypatch) -> None:
 
     assert report.success is False
     assert report.code == "PENDING_TIMEOUT"
+
+
+def test_build_plan_resolves_attach_algo_orders_from_trade_protection() -> None:
+    client = _DummyOKXClient()
+    engine = ExecutionEngine(client)
+    signal = TradeSignal(
+        action=SignalAction.BUY,
+        confidence=0.55,
+        reason="x",
+        size=0.01,
+        protection=TradeProtection(
+            take_profit=ProtectionRule(mode="rr", value=2.0),
+            stop_loss=ProtectionRule(mode="ratio", value=0.01),
+        ),
+    )
+
+    plan = engine.build_plan(
+        inst_id="BTC-USDT-SWAP",
+        signal=signal,
+        td_mode="cross",
+        pos_side="long",
+        latest_price=100.0,
+        atr=1.0,
+        trace_id="tp-sl-redesign",
+    )
+    payload = engine._build_attach_algo_orders(plan.protection)
+
+    assert payload == [
+        {
+            "tpTriggerPx": "102",
+            "tpTriggerPxType": "last",
+            "tpOrdPx": "-1",
+            "tpOrdKind": "condition",
+            "slTriggerRatio": "-0.01",
+            "slTriggerPxType": "last",
+            "slOrdPx": "-1",
+            "slOrdKind": "condition",
+        }
+    ]

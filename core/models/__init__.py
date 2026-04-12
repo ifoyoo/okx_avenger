@@ -22,12 +22,32 @@ class ProtectionRule:
     trigger_type: str = "last"
     order_type: str = "market"
 
+    @staticmethod
+    def normalize_mode(mode: object) -> str:
+        normalized = str(mode or "").strip().lower()
+        alias_map = {
+            "ratio": "percent",
+            "pct": "percent",
+            "percentage": "percent",
+            "risk_reward": "rr",
+            "risk-reward": "rr",
+            "r": "rr",
+            "off": "disabled",
+            "none": "disabled",
+        }
+        if not normalized:
+            return "disabled"
+        return alias_map.get(normalized, normalized)
+
+    def normalized_mode(self) -> str:
+        return self.normalize_mode(self.mode)
+
     def is_active(self) -> bool:
         try:
             value = float(self.value)
         except (TypeError, ValueError):
             value = 0.0
-        return self.mode not in ("disabled", "off", "none", "", None) and value > 0
+        return self.normalized_mode() != "disabled" and value > 0
 
 
 @dataclass
@@ -59,7 +79,15 @@ class ProtectionTarget:
 
 @dataclass
 class TradeProtection:
-    """附着在 TradeSignal 上的止盈/止损方案."""
+    """附着在 TradeSignal 上的止盈/止损规则意图."""
+
+    take_profit: Optional[ProtectionRule] = None
+    stop_loss: Optional[ProtectionRule] = None
+
+
+@dataclass
+class ResolvedTradeProtection:
+    """按入场参考价解析后的止盈/止损目标."""
 
     take_profit: Optional[ProtectionTarget] = None
     stop_loss: Optional[ProtectionTarget] = None
