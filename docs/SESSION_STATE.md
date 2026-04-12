@@ -5,8 +5,8 @@
 ## 元信息
 - 最后更新时间：2026-04-12
 - 当前主线：按 `docs/NODES.md` 推进
-- 当前批次：四阶段策略/分析质量提升已完成，watchlist 已收口为 manual-only，TP/SL 语义已统一到规则解析链路，通知模块已接回 runtime 主链路
-- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；当前回到可交付状态下的观测与参数微调
+- 当前批次：四阶段策略/分析质量提升已完成；watchlist 已收口为 manual-only；TP/SL / 通知 / release hardening 已收口；当前进入上线前 smoke 与参数观测
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
@@ -29,6 +29,31 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-12
+- 节点：交付硬化 - release hardening
+- 目标：在上线前补齐最容易造成“看起来能跑、实际上不可信”的四个缺口：死配置误填、LLM 截断、runtime 部分失败语义和依赖可复现性。
+- 结果：完成。`.env` 现在会显式识别未知键并在 `get_settings()` / `config-check` 拒绝继续；`LLMBrain` 请求增加 `response_format=json_object`，并在 `finish_reason=length` 时拒绝结果；`run_runtime_cycle()` 不再把“没抛异常”误记成成功，而是输出 `完成/阻断/观望/失败` 四类统计并对部分失败返回 `1`；仓库新增 `constraints.txt`，README 安装命令改为带约束安装。当前已达到可交付状态。
+- 变更文件：
+  - `config/settings.py`
+  - `cli_app/config_workflows.py`
+  - `core/analysis/llm_brain.py`
+  - `cli_app/runtime_execution.py`
+  - `constraints.txt`
+  - `README.md`
+  - `tests/test_settings_validation.py`
+  - `tests/test_cli_config_workflows.py`
+  - `tests/test_llm_brain.py`
+  - `tests/test_cli_runtime_cycle.py`
+  - `tests/test_requirements_manifest.py`
+  - `docs/superpowers/plans/2026-04-12-release-hardening.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_settings_validation.py tests/test_cli_config_workflows.py tests/test_llm_brain.py tests/test_cli_runtime_cycle.py tests/test_requirements_manifest.py` -> `28 passed`
+  - `.venv/bin/python -m pytest -q` -> `179 passed`
+  - `./okx config-check` -> `pass`
+
 - 时间：2026-04-12
 - 节点：通知模块重构 - runtime notification center
 - 目标：把悬空的 Telegram 通知代码收口到当前真实运行链路，统一异常/阻断/下单结果的通知语义。

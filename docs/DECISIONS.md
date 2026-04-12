@@ -4,6 +4,17 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0024 - 上线前补齐 release hardening 的四个可信度缺口
+- 背景：项目已基本可交付，但仍有四类会在真实运行中制造误判的问题：`.env` 拼错键会被静默忽略、LLM 被截断时仍可能被当成有效 JSON、runtime 有部分失败仍可能返回 `0`、安装缺少一份已验证的依赖约束。
+- 决策：
+  - 增加 `.env` 未知键扫描，`get_settings()` 与 `config-check` 对未知键直接拒绝继续。
+  - `LLMBrain` 请求显式带 `response_format={"type": "json_object"}`，并在 `finish_reason=length` 时丢弃响应。
+  - `run_runtime_cycle()` 统计改为 `完成/阻断/观望/失败` 四类，出现部分失败时返回 `1`，仅全部失败返回 `2`。
+  - 仓库新增 `constraints.txt`，README 安装命令统一改为 `pip install -r requirements.txt -c constraints.txt`。
+- 原因：交付前最重要的不是继续加功能，而是减少“配置写错却没人发现”“模型截断却被当真”“本轮有失败却看起来成功”“线上装出未验证版本组合”这类高成本误判。
+- 影响：配置面更诚实、LLM 输出更稳、runtime 退出码和日志语义更可信、部署更可复现；全量测试提升到 `179 passed`。
+- 回滚方案：若某些上游兼容接口不支持 `response_format`，可暂时只保留截断拒绝与 prompt 约束；其余改动不建议回退。
+
 ### 2026-04-12 - D0023 - 通知模块收口为 runtime notification center
 - 背景：`core/utils/notifications.py` 里虽然有 Telegram 推送代码，但主运行链路从未构建或调用它；README 与配置面却一直把通知描述成已接入。
 - 决策：

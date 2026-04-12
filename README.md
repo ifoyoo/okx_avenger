@@ -33,7 +33,7 @@
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt
 ```
 
 ## Structure
@@ -42,6 +42,7 @@ pip install -r requirements.txt
 okx_avenger/
 ├── README.md
 ├── requirements.txt
+├── constraints.txt
 ├── .env
 ├── watchlist.json
 ├── okx                  # shell 入口
@@ -113,6 +114,12 @@ LLM_MAX_TOKENS=4096
 
 ```bash
 ./okx config-check
+```
+
+如果你要重装环境，继续用这一条，不要裸装：
+
+```bash
+pip install -r requirements.txt -c constraints.txt
 ```
 
 先跑模拟：

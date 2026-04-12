@@ -140,6 +140,54 @@ def test_llm_brain_rejects_missing_reason(monkeypatch) -> None:
     assert decision is None
 
 
+def test_llm_brain_rejects_truncated_response(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        enabled=True,
+        provider="openai_compatible",
+        api_base="https://example.com/v1",
+        api_key="test-key",
+        model="test-model",
+        timeout_seconds=3.0,
+        temperature=0.1,
+        max_tokens=128,
+        min_quality_score=0.1,
+        reject_missing_reason=False,
+    )
+    brain = LLMBrain(settings)
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {
+                            "content": '{"action":"buy","confidence":0.8,"reason":"still json but truncated upstream"}'
+                        },
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("core.analysis.llm_brain.requests.post", lambda *args, **kwargs: _Resp())
+    features = pd.DataFrame([{"close": 100.0, "rsi": 54.0, "atr": 1.5, "ema_fast": 101.0, "ema_slow": 99.0}])
+
+    decision = brain.analyze(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        features=features,
+        higher_features=None,
+        deterministic_summary="summary",
+        deterministic_analysis="analysis",
+        risk_note=None,
+        account_snapshot={"equity": 1000.0, "available": 600.0},
+    )
+
+    assert decision is None
+
+
 def test_llm_brain_prompt_includes_structured_market_and_intel_context(monkeypatch) -> None:
     settings = SimpleNamespace(
         enabled=True,
@@ -207,3 +255,45 @@ def test_llm_brain_prompt_includes_structured_market_and_intel_context(monkeypat
     assert "structured_market_intel=" in user_prompt
     assert '"trend_direction": "bullish"' in user_prompt
     assert '"security": 0.8' in user_prompt
+
+
+def test_llm_brain_chat_requests_json_response_format(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        enabled=True,
+        provider="openai_compatible",
+        api_base="https://example.com/v1",
+        api_key="test-key",
+        model="test-model",
+        timeout_seconds=3.0,
+        temperature=0.1,
+        max_tokens=128,
+        min_quality_score=0.1,
+        reject_missing_reason=False,
+    )
+    brain = LLMBrain(settings)
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": '{"action":"buy","confidence":0.8,"reason":"ok"}'
+                        },
+                    }
+                ]
+            }
+
+    def _fake_post(*args, **kwargs):
+        captured["payload"] = kwargs.get("json") or {}
+        return _Resp()
+
+    monkeypatch.setattr("core.analysis.llm_brain.requests.post", _fake_post)
+
+    assert brain._chat("hello") == '{"action":"buy","confidence":0.8,"reason":"ok"}'
+    assert captured["payload"]["response_format"] == {"type": "json_object"}

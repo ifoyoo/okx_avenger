@@ -100,6 +100,23 @@ def _publish_runtime_result(
         )
 
 
+def _is_failed_execution_result(
+    *,
+    signal: TradeSignal,
+    plan: Optional[ExecutionPlan],
+    execution_report: Optional[object],
+    order: Optional[dict],
+) -> bool:
+    if signal.action == SignalAction.HOLD:
+        return False
+    if plan and plan.blocked:
+        return False
+    order_error = bool(isinstance(order, dict) and isinstance(order.get("error"), dict))
+    if execution_report is None:
+        return order_error
+    return not bool(getattr(execution_report, "success", False)) or order_error
+
+
 def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     account_snapshot = _safe_account_snapshot(bundle.engine)
     perf_stats = bundle.perf_tracker.get_snapshot()
@@ -115,7 +132,10 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         return 0
 
     logger.info("开始执行，本轮 {} 个标的（dry_run={}）", len(entries), bool(args.dry_run))
-    success = 0
+    completed = 0
+    blocked = 0
+    hold = 0
+    failed = 0
     for item in entries:
         inst_id = item["inst_id"]
         timeframe = item.get("timeframe", DEFAULT_TIMEFRAME)
@@ -143,6 +163,7 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         except Exception as exc:
             logger.error("[{} {}] 执行失败: {}", inst_id, timeframe, exc)
             _publish_runtime_error(bundle, inst_id=inst_id, timeframe=timeframe, detail=str(exc))
+            failed += 1
             continue
 
         signal: TradeSignal = result["signal"]
@@ -178,9 +199,30 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
             execution_report=report,
             order=result.get("order"),
         )
-        success += 1
-    logger.info("本轮结束：{}/{} 成功完成", success, len(entries))
-    return 0 if success > 0 else 2
+        if signal.action == SignalAction.HOLD:
+            hold += 1
+        elif plan and plan.blocked:
+            blocked += 1
+        elif _is_failed_execution_result(
+            signal=signal,
+            plan=plan,
+            execution_report=report,
+            order=result.get("order"),
+        ):
+            failed += 1
+        else:
+            completed += 1
+    logger.info(
+        "本轮结束：总计 {}，完成 {}，阻断 {}，观望 {}，失败 {}",
+        len(entries),
+        completed,
+        blocked,
+        hold,
+        failed,
+    )
+    if failed == 0:
+        return 0
+    return 1 if (completed + blocked + hold) > 0 else 2
 
 
 def log_strategy_snapshot(bundle: RuntimeBundle) -> None:

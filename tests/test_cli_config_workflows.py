@@ -86,3 +86,11 @@ def test_run_config_check_returns_one_when_api_check_fails(monkeypatch, capsys) 
 
     assert workflows.run_config_check(argparse.Namespace(api_check=True)) == 1
     assert "❌ API 联通性检查失败: api boom" in capsys.readouterr().out
+
+
+def test_run_config_check_returns_two_when_env_contains_unknown_keys(monkeypatch, capsys) -> None:
+    workflows = _load_workflows()
+    monkeypatch.setattr(workflows, "find_unknown_env_keys", lambda *_args, **_kwargs: ("DEFAULT_LEVERGAE",))
+
+    assert workflows.run_config_check(argparse.Namespace(api_check=False)) == 2
+    assert "❌ 检测到未知 .env 配置项: DEFAULT_LEVERGAE" in capsys.readouterr().out

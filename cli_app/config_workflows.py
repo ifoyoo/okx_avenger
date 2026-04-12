@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from config.settings import dump_config_snapshot, get_settings
+from config.settings import UnknownEnvKeysError, dump_config_snapshot, find_unknown_env_keys, get_settings
 
 from cli_app.config_reporting import format_config_summary_lines
 from cli_app.context import build_runtime
@@ -38,7 +38,17 @@ def _run_api_check() -> int:
 
 
 def run_config_check(args: argparse.Namespace) -> int:
-    settings = get_settings()
+    unknown_keys = find_unknown_env_keys()
+    if unknown_keys:
+        print("❌ 检测到未知 .env 配置项:", ", ".join(unknown_keys))
+        return 2
+
+    try:
+        settings = get_settings()
+    except UnknownEnvKeysError as exc:
+        print("❌ 检测到未知 .env 配置项:", ", ".join(exc.keys))
+        return 2
+
     missing = []
     if not settings.account.okx_api_key:
         missing.append("OKX_API_KEY")

@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from pydantic import Field, field_validator, model_validator
+from dotenv import dotenv_values
 
-from .base import SettingsBase
+from .base import ENV_PATH, SettingsBase
 
 
 class AccountSettings(SettingsBase):
@@ -227,8 +228,59 @@ class AppSettings:
     intel: IntelSettings
 
 
+class UnknownEnvKeysError(ValueError):
+    """Raised when the current .env file contains unsupported keys."""
+
+    def __init__(self, keys: tuple[str, ...]) -> None:
+        self.keys = keys
+        super().__init__(f"Unknown .env keys: {', '.join(keys)}")
+
+
+def _supported_env_keys() -> frozenset[str]:
+    models = (
+        AccountSettings,
+        StrategySettings,
+        RuntimeSettings,
+        NotificationSettings,
+        LLMSettings,
+        IntelSettings,
+    )
+    keys: set[str] = set()
+    for model in models:
+        for field_name, field_info in model.model_fields.items():
+            alias = field_info.alias or field_name
+            key = str(alias).strip()
+            if key:
+                keys.add(key)
+    return frozenset(keys)
+
+
+SUPPORTED_ENV_KEYS = _supported_env_keys()
+
+
+def find_unknown_env_keys(env_path: str | Path = ENV_PATH) -> tuple[str, ...]:
+    path = Path(env_path)
+    if not path.exists():
+        return ()
+
+    payload = dotenv_values(path)
+    unknown = sorted(
+        key.strip()
+        for key in payload
+        if key and key.strip() and key.strip() not in SUPPORTED_ENV_KEYS
+    )
+    return tuple(unknown)
+
+
+def validate_env_file_keys(env_path: str | Path = ENV_PATH) -> None:
+    unknown = find_unknown_env_keys(env_path)
+    if unknown:
+        raise UnknownEnvKeysError(unknown)
+
+
 @lru_cache()
 def get_settings() -> AppSettings:
+    validate_env_file_keys()
     return AppSettings(
         account=AccountSettings(),
         strategy=StrategySettings(),

@@ -17,6 +17,7 @@ from config.settings import (
     StrategySettings,
     build_config_snapshot,
     dump_config_snapshot,
+    find_unknown_env_keys,
 )
 
 
@@ -72,3 +73,10 @@ def test_build_and_dump_config_snapshot(tmp_path) -> None:
     with path.open("r", encoding="utf-8") as fh:
         payload = json.load(fh)
     assert payload["strategy"]["strategy_arb_enabled"] is True
+
+
+def test_find_unknown_env_keys_reports_unrecognized_keys(tmp_path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("OKX_API_KEY=k\nDEFAULT_LEVERGAE=10\n", encoding="utf-8")
+
+    assert find_unknown_env_keys(env_path) == ("DEFAULT_LEVERGAE",)

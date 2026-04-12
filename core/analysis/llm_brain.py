@@ -295,6 +295,7 @@ class LLMBrain:
             "model": self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
@@ -313,7 +314,12 @@ class LLMBrain:
             choices = body.get("choices") or []
             if not choices:
                 return None
-            message = choices[0].get("message") or {}
+            choice = choices[0] or {}
+            finish_reason = str(choice.get("finish_reason") or "").strip().lower()
+            if finish_reason == "length":
+                logger.warning("LLMBrain 响应因长度限制被截断，已忽略。")
+                return None
+            message = choice.get("message") or {}
             content = message.get("content")
             if isinstance(content, str):
                 return content
