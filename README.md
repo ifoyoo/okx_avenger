@@ -1,6 +1,6 @@
-# OKX Runtime
+# OKX Avenger
 
-一个面向 OKX 永续合约的轻量运行框架。
+操他妈的 OKX，上次害我亏了10U，所以这是一个面向 OKX 合约复仇的轻量自动交易程序，我期待再次爆仓，娱乐玩具勿当真。
 
 当前实现重点：
 - 手动 `watchlist.json`
