@@ -112,8 +112,6 @@ class RuntimeSettings(SettingsBase):
     feature_min_samples: int = Field(80, alias="FEATURE_MIN_SAMPLES")
     feature_indicator_overrides: str = Field("", alias="FEATURE_INDICATOR_OVERRIDES")
     log_dir: str = Field("logs", alias="LOG_DIR")
-    app_version: str = Field("0.1.0", alias="APP_VERSION")
-    app_author: str = Field("余韵的左手（laofan_Fucker）", alias="APP_AUTHOR")
     protection_monitor_interval_seconds: float = Field(
         30.0, alias="PROTECTION_MONITOR_INTERVAL_SECONDS"
     )

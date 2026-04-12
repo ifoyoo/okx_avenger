@@ -30,6 +30,20 @@
 
 ## 最近完成项（最新一条放最上）
 - 时间：2026-04-12
+- 节点：配置面清理 - 移除未使用 app metadata
+- 目标：清理 `.env` 中看似重要、实际未被运行链路消费的 `APP_VERSION` / `APP_AUTHOR`，避免继续污染配置面。
+- 结果：完成。`RuntimeSettings` 已删除 `APP_VERSION` / `APP_AUTHOR`；`.env` 中对应字段已移除；全量测试保持通过，`config-check` 输出无变化。
+- 变更文件：
+  - `config/settings.py`
+  - `tests/test_settings_validation.py`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_settings_validation.py` -> `4 passed`
+  - `.venv/bin/python -m pytest -q` -> `159 passed`
+  - `./okx config-check` -> `pass`
+
+- 时间：2026-04-12
 - 节点：交付前仓库清理
 - 目标：按“当前实现可运行且可交付”为边界，删除与当前主线无关的旧代码、资料文件、本地残留与过时说明，并准备推送远端。
 - 结果：完成。已删除 `okx-doc.html`、旧 `.worktrees/cli-entry-consolidation` 本地 worktree、项目级缓存/日志/运行产物；README 已改为真实入口 `./okx` / `python cli.py`；auto watchlist 旧路径和配置已清理；全量测试保持通过。

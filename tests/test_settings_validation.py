@@ -33,6 +33,13 @@ def test_intel_settings_reject_invalid_threshold_order() -> None:
         )
 
 
+def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
+    runtime = RuntimeSettings()
+
+    assert not hasattr(runtime, "app_version")
+    assert not hasattr(runtime, "app_author")
+
+
 def test_build_and_dump_config_snapshot(tmp_path) -> None:
     runtime = RuntimeSettings(CONFIG_SNAPSHOT_PATH=str(tmp_path / "snapshot.json"))
     settings = AppSettings(
