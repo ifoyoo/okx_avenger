@@ -1,15 +1,19 @@
 # OKX Avenger
 
-操他妈的 OKX，上次害我亏了10U，所以这是一个面向 OKX 合约复仇的轻量自动交易程序，我期待再次爆仓，娱乐玩具勿当真。
+> Not here to look smart.  
+> Here to stay alive long enough to fire the next order.
 
-当前实现重点：
+一个面向 OKX 永续合约的轻量自动交易 runtime。
+
+当前版本的方向很明确：
 - 手动 `watchlist.json`
-- 单次运行 / 循环运行
+- `once / run / status / backtest`
 - 内置信号、风控、止盈止损
 - Telegram 通知
-- 支持 `--dry-run`
+- 支持 Gemini LLM 辅助判断
+- 默认先用 `--dry-run`
 
-## 1. 安装
+## Quick Start
 
 ```bash
 python3 -m venv .venv
@@ -17,9 +21,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 2. 最小配置
+## Minimal Config
 
-在项目根目录创建 `.env`：
+在根目录准备 `.env`：
 
 ```ini
 OKX_API_KEY=xxx
@@ -33,21 +37,23 @@ DEFAULT_LEVERAGE=10
 DEFAULT_TAKE_PROFIT_PCT=0.06
 DEFAULT_STOP_LOSS_PCT=0.03
 
-NOTIFY_ENABLED=false
+NOTIFY_ENABLED=true
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 NOTIFY_LEVEL=orders
+
+LLM_ENABLED=true
+LLM_PROVIDER=openai_compatible
+LLM_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai
+LLM_API_KEY=
+LLM_MODEL=gemini-2.5-flash
+LLM_TIMEOUT_SECONDS=15
+LLM_MAX_TOKENS=4096
 ```
 
-可选能力：
-- 新闻：`NEWS_*`、`COINGECKO_*`
-- LLM：`LLM_*`
+## Watchlist
 
-不配也能运行。
-
-## 3. Watchlist
-
-编辑 `watchlist.json`：
+`watchlist.json` 现在默认就是最小实战形态：
 
 ```json
 [
@@ -55,7 +61,9 @@ NOTIFY_LEVEL=orders
 ]
 ```
 
-## 4. 运行
+你当然可以加 `ETH-USDT-SWAP`，但别一上来把 watchlist 写成垃圾场。
+
+## Run
 
 先检查配置：
 
@@ -67,22 +75,33 @@ NOTIFY_LEVEL=orders
 
 ```bash
 ./okx once --dry-run
-```
-
-常驻循环：
-
-```bash
 ./okx run --dry-run
 ```
 
-查看账户和持仓：
+看账户和持仓：
 
 ```bash
 ./okx status
 ```
 
-## 5. 实盘说明
+回测：
+
+```bash
+./okx backtest run --inst BTC-USDT-SWAP --timeframe 5m --limit 800
+./okx backtest report
+```
+
+## Notes
 
 - 去掉 `--dry-run` 才会真实下单。
-- 资金过小会被最小下单量拦截。
-- 杠杆要和 OKX 账户实际设置一致。
+- 资金太小，系统会因为最小下单量直接拦截。
+- 杠杆要和 OKX 账户真实设置一致。
+- LLM 只该辅助，不该替你发疯。
+
+## Attitude
+
+这不是圣杯。
+这不是财富自由按钮。
+这是一套尽量把数据、风控、执行和通知接干净的 OKX 合约运行框架。
+
+想活久一点，就先尊重仓位、尊重止损、尊重现实。
