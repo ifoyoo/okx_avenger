@@ -86,13 +86,14 @@ def test_show_runtime_status_prints_sections(monkeypatch, capsys) -> None:
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "=== Account ===" in output
-    assert "=== Watchlist ===" in output
-    assert "=== Position ===" in output
-    assert "=== Runtime Heartbeat ===" in output
+    assert "=== Runtime Status ===" in output
+    assert "Account" in output
+    assert "Watchlist" in output
+    assert "Positions" in output
+    assert "Heartbeat" in output
     assert "equity line" in output
     assert "watchlist line" in output
-    assert "(no positions)" in output
+    assert "none" in output
     assert "heartbeat line" in output
 
 

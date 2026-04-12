@@ -53,9 +53,14 @@ class TelegramNotifier:
 @dataclass(frozen=True)
 class NotificationEvent:
     kind: str
-    message: str
+    message: str = ""
     inst_id: str = ""
     timeframe: str = ""
+    action: str = ""
+    confidence: Optional[float] = None
+    size: Optional[float] = None
+    detail: str = ""
+    code: str = ""
     parse_mode: Optional[str] = None
 
     def cooldown_key(self) -> Tuple[str, str]:
@@ -94,8 +99,53 @@ class NotificationCenter:
             return False
         if not self._consume_cooldown(event.cooldown_key()):
             return False
-        self.transport.send(event.message, parse_mode=event.parse_mode)
+        self.transport.send(self._render_event_message(event), parse_mode=event.parse_mode)
         return True
+
+    def _render_event_message(self, event: NotificationEvent) -> str:
+        header = {
+            "runtime_error": "[RUNTIME ERROR]",
+            "trade_blocked": "[TRADE BLOCKED]",
+            "order_failed": "[ORDER FAILED]",
+            "order_submitted": "[ORDER SUBMITTED]",
+        }.get(event.kind, "[NOTIFY]")
+        subject = self._render_subject_line(event)
+        detail = self._render_detail_line(event)
+        return "\n".join([header, subject, detail])
+
+    @staticmethod
+    def _render_subject_line(event: NotificationEvent) -> str:
+        parts = []
+        if event.inst_id:
+            parts.append(event.inst_id)
+        if event.timeframe:
+            parts.append(event.timeframe)
+        if event.action:
+            parts.append(event.action)
+        if event.confidence is not None:
+            parts.append(f"conf={float(event.confidence):.2f}")
+        if event.kind == "order_submitted" and event.size is not None:
+            parts.append(f"size={float(event.size):.6f}")
+        if parts:
+            return " ".join(parts)
+        if event.kind == "runtime_error":
+            return "runtime"
+        return "global"
+
+    @staticmethod
+    def _render_detail_line(event: NotificationEvent) -> str:
+        detail = str(event.detail or "").strip()
+        code = str(event.code or "").strip()
+        message = str(event.message or "").strip()
+        if code and detail:
+            return f"code={code} msg={detail}"
+        if code:
+            return f"code={code}"
+        if detail:
+            return detail
+        if message:
+            return message
+        return "-"
 
     def _level_allows(self, kind: str) -> bool:
         critical = {"runtime_error", "trade_blocked", "order_failed"}

@@ -6,7 +6,7 @@
 - 最后更新时间：2026-04-12
 - 当前主线：按 `docs/NODES.md` 推进
 - 当前批次：四阶段策略/分析质量提升已完成；watchlist 已收口为 manual-only；TP/SL / 通知 / release hardening 已收口；当前进入上线前 smoke 与参数观测
-- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐；CLI/runtime/通知/backtest 输出已统一为 summary-first 契约
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
@@ -29,6 +29,41 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-12
+- 节点：输出优化 - summary-first output contract
+- 目标：统一 `config-check`、`status`、runtime 日志、Telegram 通知与 backtest/tune 报告的表达层，让人类扫读成本明显下降。
+- 结果：完成。`config-check` 改为 `CONFIG READY + Account/Runtime/Notify/LLM/Intel` 分组摘要；`status` 改为 `Runtime Status` 单页视图；runtime 日志改成 `cycle start / inst result / cycle summary` 三层固定句式；通知改为事件模板渲染；backtest 报告新增 summary 首屏，trade/tune 输出也更紧凑。当前 `./okx config-check` 与 `./okx status` 已按新契约通过 smoke。
+- 变更文件：
+  - `cli_app/config_reporting.py`
+  - `cli_app/config_workflows.py`
+  - `cli_app/runtime_reporting.py`
+  - `cli_app/runtime_status_helpers.py`
+  - `cli_app/runtime_execution.py`
+  - `cli_app/runtime_helpers.py`
+  - `core/utils/notifications.py`
+  - `cli_app/runtime_workflows.py`
+  - `cli_app/backtest_reporting.py`
+  - `cli_app/backtest_helpers.py`
+  - `tests/test_cli_config_reporting.py`
+  - `tests/test_cli_config_workflows.py`
+  - `tests/test_cli_runtime_reporting.py`
+  - `tests/test_cli_status_formatting.py`
+  - `tests/test_cli_runtime_workflows.py`
+  - `tests/test_cli_runtime_cycle.py`
+  - `tests/test_notifications.py`
+  - `tests/test_cli_backtest_reporting.py`
+  - `tests/test_cli_backtest_workflows.py`
+  - `docs/superpowers/specs/2026-04-12-output-optimization-design.md`
+  - `docs/superpowers/plans/2026-04-12-output-optimization.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_cli_config_reporting.py tests/test_cli_config_workflows.py tests/test_cli_runtime_reporting.py tests/test_cli_status_formatting.py tests/test_cli_runtime_workflows.py tests/test_cli_runtime_cycle.py tests/test_notifications.py tests/test_cli_backtest_reporting.py tests/test_cli_backtest_workflows.py` -> `41 passed`
+  - `.venv/bin/python -m pytest -q` -> `181 passed`
+  - `./okx config-check` -> `pass`
+  - `./okx status` -> `pass`
+
 - 时间：2026-04-12
 - 节点：交付硬化 - release hardening
 - 目标：在上线前补齐最容易造成“看起来能跑、实际上不可信”的四个缺口：死配置误填、LLM 截断、runtime 部分失败语义和依赖可复现性。

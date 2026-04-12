@@ -2,18 +2,60 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from cli_app.backtest_helpers import _safe_float
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def format_backtest_summary_lines(records: List[Dict[str, Any]]) -> List[str]:
+    if not records:
+        return ["暂无回测结果。"]
+
+    total_trades = 0
+    total_net = 0.0
+    best_inst = "-"
+    best_net = float("-inf")
+    for item in records:
+        summary = item.get("summary") or {}
+        total_trades += int(_safe_float(summary.get("total_trades")))
+        net_pnl = _safe_float(summary.get("net_pnl"))
+        total_net += net_pnl
+        inst_id = str(summary.get("inst_id", "-"))
+        if net_pnl > best_net:
+            best_net = net_pnl
+            best_inst = inst_id
+
+    lines = [
+        "=== Backtest Report ===",
+        f"summary records={len(records)} total_trades={total_trades} net_pnl={total_net:+.2f} best={best_inst}",
+        "",
+        f"{'inst':<18} {'tf':<5} {'trades':<8} {'win_rate':<9} {'net_pnl':<12} {'max_dd':<8}",
+        "-" * 70,
+    ]
+    for item in records:
+        summary = item.get("summary") or {}
+        inst = str(summary.get("inst_id", "-"))
+        tf = str(summary.get("timeframe", "-"))
+        trades = int(_safe_float(summary.get("total_trades")))
+        win_rate = _safe_float(summary.get("win_rate")) * 100
+        net_pnl = _safe_float(summary.get("net_pnl"))
+        max_dd = _safe_float(summary.get("max_drawdown")) * 100
+        lines.append(f"{inst:<18} {tf:<5} {trades:<8d} {win_rate:>6.1f}%  {net_pnl:>+10.2f}  {max_dd:>6.1f}%")
+    return lines
 
 
 def format_trade_lines(records: List[Dict[str, Any]], max_trades: int) -> List[str]:
-    lines = ["", "=== Trades (latest first) ==="]
+    lines = ["", "=== Trade Samples ==="]
     for item in records:
         summary = item.get("summary") or {}
         trades = list(item.get("trades") or [])
         inst_id = str(summary.get("inst_id", "-"))
         timeframe = str(summary.get("timeframe", "-"))
         lines.append("")
-        lines.append(f"[{inst_id} {timeframe}]")
+        lines.append(f"[{inst_id} {timeframe} latest={max_trades}]")
         for trade in list(reversed(trades))[:max_trades]:
             side = str(trade.get("side", "-")).upper()
             qty = _safe_float(trade.get("qty"))
@@ -37,9 +79,13 @@ def format_tune_lines(
     stats_rows: Dict[str, List[Tuple[int, float, float]]],
     regime_score_buckets: Dict[str, Dict[str, List[float]]],
 ) -> List[str]:
+    leader_name = "-"
+    leader_score = 0.0
+    if scores:
+        leader_name, leader_score = max(scores.items(), key=lambda item: item[1])
     lines = [
         "=== Backtest Tune ===",
-        f"instruments={scanned_instruments} lookback_bars={lookback_bars}",
+        f"leader={leader_name} score={leader_score:+.4f} scanned={scanned_instruments} lookback={lookback_bars}",
         f"{'plugin':<24} {'samples':<8} {'trades':<8} {'win_rate':<9} {'net_pnl':<12} {'score':<8} {'weight':<7}",
         "-" * 88,
     ]

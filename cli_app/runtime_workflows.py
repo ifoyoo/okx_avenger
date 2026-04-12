@@ -28,7 +28,7 @@ def _notify_runtime_failure(bundle: RuntimeBundle, *, detail: str) -> None:
     notifier = getattr(bundle, "notifier", None)
     if notifier is None:
         return
-    notifier.publish(NotificationEvent(kind="runtime_error", message=f"[runtime] {detail}"))
+    notifier.publish(NotificationEvent(kind="runtime_error", detail=detail))
 
 
 def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:

@@ -9,7 +9,6 @@ from cli_app.context import RuntimeBundle
 from cli_app.runtime_helpers import (
     DEFAULT_HIGHER_TIMEFRAMES,
     DEFAULT_TIMEFRAME,
-    _fmt_action,
     _fmt_plan,
     _resolve_entries,
     _safe_account_snapshot,
@@ -29,7 +28,7 @@ def _publish_runtime_error(bundle: RuntimeBundle, *, inst_id: str, timeframe: st
             kind="runtime_error",
             inst_id=inst_id,
             timeframe=timeframe,
-            message=f"[{inst_id} {timeframe}] runtime_error: {detail}",
+            detail=detail,
         )
     )
 
@@ -56,10 +55,9 @@ def _publish_runtime_result(
                 kind="trade_blocked",
                 inst_id=inst_id,
                 timeframe=timeframe,
-                message=(
-                    f"[{inst_id} {timeframe}] {signal.action.value.upper()} blocked "
-                    f"conf={signal.confidence:.2f} reason={plan.block_reason}"
-                ),
+                action=signal.action.value.upper(),
+                confidence=signal.confidence,
+                detail=f"reason={plan.block_reason}",
             )
         )
         return
@@ -72,10 +70,9 @@ def _publish_runtime_result(
                 kind="order_submitted",
                 inst_id=inst_id,
                 timeframe=timeframe,
-                message=(
-                    f"[{inst_id} {timeframe}] order_submitted "
-                    f"{signal.action.value.upper()} conf={signal.confidence:.2f} size={signal.size:.6f}"
-                ),
+                action=signal.action.value.upper(),
+                confidence=signal.confidence,
+                size=signal.size,
             )
         )
         return
@@ -92,10 +89,10 @@ def _publish_runtime_result(
                 kind="order_failed",
                 inst_id=inst_id,
                 timeframe=timeframe,
-                message=(
-                    f"[{inst_id} {timeframe}] order_failed {signal.action.value.upper()} "
-                    f"code={code_text or '-'} msg={error_text or '-'}"
-                ),
+                action=signal.action.value.upper(),
+                confidence=signal.confidence,
+                code=code_text or "",
+                detail=error_text or "-",
             )
         )
 
@@ -117,6 +114,101 @@ def _is_failed_execution_result(
     return not bool(getattr(execution_report, "success", False)) or order_error
 
 
+def _runtime_result_status(
+    *,
+    dry_run: bool,
+    signal: TradeSignal,
+    plan: Optional[ExecutionPlan],
+    execution_report: Optional[object],
+    order: Optional[dict],
+) -> str:
+    if signal.action == SignalAction.HOLD:
+        return "hold"
+    if plan and plan.blocked:
+        return "blocked"
+    if _is_failed_execution_result(
+        signal=signal,
+        plan=plan,
+        execution_report=execution_report,
+        order=order,
+    ):
+        return "failed"
+    if dry_run:
+        return "dry_run"
+    return "submitted"
+
+
+def _runtime_result_note(
+    *,
+    status: str,
+    plan: Optional[ExecutionPlan],
+    execution_report: Optional[object],
+    order: Optional[dict],
+) -> str:
+    if status == "blocked":
+        return f"reason={plan.block_reason or '-'}" if plan else "reason=-"
+    if status == "failed":
+        code_text = str(getattr(execution_report, "code", "") or "")
+        error_text = str(getattr(execution_report, "error", "") or "")
+        if isinstance(order, dict) and not error_text:
+            error_info = order.get("error") if isinstance(order.get("error"), dict) else {}
+            if error_info:
+                error_text = str(error_info.get("message") or "")
+                code_text = code_text or str(error_info.get("code") or "")
+        if code_text and error_text:
+            return f"code={code_text} msg={error_text}"
+        if code_text:
+            return f"code={code_text}"
+        if error_text:
+            return f"msg={error_text}"
+        return "msg=-"
+    return f"plan={_fmt_plan(plan)}"
+
+
+def _format_runtime_result_line(
+    *,
+    inst_id: str,
+    timeframe: str,
+    dry_run: bool,
+    signal: TradeSignal,
+    plan: Optional[ExecutionPlan],
+    execution_report: Optional[object],
+    order: Optional[dict],
+    brain: Optional[dict],
+    intel: Optional[dict],
+) -> str:
+    status = _runtime_result_status(
+        dry_run=dry_run,
+        signal=signal,
+        plan=plan,
+        execution_report=execution_report,
+        order=order,
+    )
+    parts = [
+        f"inst={inst_id}",
+        f"tf={timeframe}",
+        f"action={signal.action.value.upper()}",
+        f"conf={signal.confidence:.2f}",
+        f"result={status}",
+        _runtime_result_note(
+            status=status,
+            plan=plan,
+            execution_report=execution_report,
+            order=order,
+        ),
+    ]
+    if brain:
+        parts.append(
+            "brain={action}@{confidence:.2f}".format(
+                action=str(brain.get("action", "-")).upper(),
+                confidence=float(brain.get("confidence", 0.0) or 0.0),
+            )
+        )
+    if intel:
+        parts.append(f"intel={float(intel.get('sentiment_score', 0.0) or 0.0):+.2f}")
+    return " ".join(parts)
+
+
 def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     account_snapshot = _safe_account_snapshot(bundle.engine)
     perf_stats = bundle.perf_tracker.get_snapshot()
@@ -131,7 +223,7 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         logger.warning("watchlist 为空，本轮跳过。")
         return 0
 
-    logger.info("开始执行，本轮 {} 个标的（dry_run={}）", len(entries), bool(args.dry_run))
+    logger.info(f"cycle start total={len(entries)} dry_run={bool(args.dry_run)}")
     completed = 0
     blocked = 0
     hold = 0
@@ -171,23 +263,18 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         report = (result.get("execution") or {}).get("report")
         brain = result.get("analysis_brain")
         intel = result.get("market_intel")
-        brain_text = ""
-        if brain:
-            brain_text = (
-                f" | brain={str(brain.get('action', '-')).upper()} "
-                f"{float(brain.get('confidence', 0.0) or 0.0):.2f}"
-            )
-        intel_text = ""
-        if intel:
-            intel_text = f" | intel={float(intel.get('sentiment_score', 0.0) or 0.0):+.2f}"
         logger.info(
-            "[{} {}] {} | {}{}{}",
-            inst_id,
-            timeframe,
-            _fmt_action(signal),
-            _fmt_plan(plan),
-            brain_text,
-            intel_text,
+            _format_runtime_result_line(
+                inst_id=inst_id,
+                timeframe=timeframe,
+                dry_run=bool(args.dry_run),
+                signal=signal,
+                plan=plan,
+                execution_report=report,
+                order=result.get("order"),
+                brain=brain,
+                intel=intel,
+            )
         )
         _publish_runtime_result(
             bundle,
@@ -213,12 +300,7 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         else:
             completed += 1
     logger.info(
-        "本轮结束：总计 {}，完成 {}，阻断 {}，观望 {}，失败 {}",
-        len(entries),
-        completed,
-        blocked,
-        hold,
-        failed,
+        f"cycle summary total={len(entries)} completed={completed} blocked={blocked} hold={hold} failed={failed}"
     )
     if failed == 0:
         return 0

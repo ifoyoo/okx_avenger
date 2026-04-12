@@ -41,14 +41,12 @@ def test_format_config_summary_lines_without_optional_sections() -> None:
     lines = reporting.format_config_summary_lines(_settings())
 
     assert lines == [
-        "✅ 本地配置字段完整。",
-        "- base_url: https://www.okx.com",
-        "- run_interval_minutes: 5",
-        "- default_leverage: 3",
-        "- notify_enabled: False",
-        "- notify_level: critical",
-        "- llm_enabled: False",
-        "- news_enabled: False",
+        "CONFIG READY",
+        "Account  base_url=https://www.okx.com",
+        "Runtime  interval=5m leverage=3",
+        "Notify   off level=critical",
+        "LLM      off",
+        "Intel    off",
     ]
 
 
@@ -56,8 +54,6 @@ def test_format_config_summary_lines_with_llm_and_news_sections() -> None:
     reporting = _load_reporting()
     lines = reporting.format_config_summary_lines(_settings(llm_enabled=True, news_enabled=True))
 
-    assert "- llm_model: gpt-x" in lines
-    assert "- llm_api_base: https://api.example.com" in lines
-    assert "- news_provider: newsapi" in lines
-    assert "- news_providers: newsapi,coingecko" in lines
-    assert "- coingecko_api_key_set: True" in lines
+    assert "Notify   off level=critical" in lines
+    assert "LLM      on model=gpt-x base=https://api.example.com" in lines
+    assert "Intel    on provider=newsapi providers=newsapi,coingecko cg_key=yes" in lines

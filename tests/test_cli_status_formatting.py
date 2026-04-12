@@ -14,15 +14,11 @@ from cli_app.runtime_status_helpers import (
 
 def test_format_account_lines() -> None:
     lines = _format_account_lines({"equity": 1000.0, "available": 250.0})
-    assert lines == [
-        "equity   : 1000.0000 USD",
-        "available: 250.0000 USD",
-        "avail_pct: 25.0%",
-    ]
+    assert lines == ["equity=1000.0000 USD available=250.0000 USD avail=25.0%"]
 
 
 def test_format_watchlist_lines_empty() -> None:
-    assert _format_watchlist_lines([]) == ["(empty)"]
+    assert _format_watchlist_lines([]) == ["none"]
 
 
 def test_format_watchlist_lines_rows() -> None:
@@ -31,7 +27,7 @@ def test_format_watchlist_lines_rows() -> None:
             {"inst_id": "BTC-USDT-SWAP", "timeframe": "15m", "higher_timeframes": ("1H", "4H")},
         ]
     )
-    assert rows == [" 1. BTC-USDT-SWAP        tf=15m  higher=1H,4H"]
+    assert rows == ["1. BTC-USDT-SWAP tf=15m higher=1H,4H"]
 
 
 def test_format_position_lines_filters_zero_positions() -> None:
@@ -41,7 +37,7 @@ def test_format_position_lines_filters_zero_positions() -> None:
             {"instId": "ETH-USDT-SWAP", "posSide": "short", "pos": "2", "upl": "12.3"},
         ]
     )
-    assert rows == ["- ETH-USDT-SWAP        side=short pos=2            upl=12.3"]
+    assert rows == ["ETH-USDT-SWAP side=short pos=2 upl=12.3"]
 
 
 def test_format_heartbeat_lines_with_detail() -> None:
@@ -56,10 +52,7 @@ def test_format_heartbeat_lines_with_detail() -> None:
         },
     )
     assert rows == [
-        "path      : data/runtime_heartbeat.json",
-        "updated_at: 2026-04-11T10:00:00+00:00",
-        "status    : error",
-        "cycle     : 3",
-        "exit_code : 2",
-        "detail    : boom",
+        "path=data/runtime_heartbeat.json",
+        "updated_at=2026-04-11T10:00:00+00:00 status=error cycle=3 exit_code=2",
+        "detail=boom",
     ]

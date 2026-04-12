@@ -19,7 +19,7 @@ def _print_snapshot_result(settings) -> None:
     except Exception as exc:
         print(f"⚠️ 配置快照写入失败: {exc}")
     else:
-        print(f"- config_snapshot: {snapshot_path}")
+        print(f"snapshot {snapshot_path}")
 
 
 def _run_api_check() -> int:
@@ -64,7 +64,7 @@ def run_config_check(args: argparse.Namespace) -> int:
     _print_snapshot_result(settings)
 
     if not args.api_check:
-        print("ℹ️ 未执行 API 联通性检查（加 --api-check 可检查）。")
+        print("api_check skipped (add --api-check)")
         return 0
 
     return _run_api_check()

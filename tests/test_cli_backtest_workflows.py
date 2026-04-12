@@ -133,7 +133,8 @@ def test_report_backtest_filters_inst_and_limits_trades(monkeypatch, capsys) -> 
     assert result == 0
     assert summary_calls == [["BTC-USDT-SWAP"]]
     output = capsys.readouterr().out
-    assert "[BTC-USDT-SWAP 5m]" in output
+    assert "=== Trade Samples ===" in output
+    assert "[BTC-USDT-SWAP 5m latest=2]" in output
     assert "qty=3.000000" in output
     assert "qty=2.000000" in output
     assert "qty=1.000000" not in output

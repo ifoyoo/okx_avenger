@@ -11,8 +11,6 @@ from loguru import logger
 from core.data.watchlist_loader import WatchlistManager
 from core.engine.execution import ExecutionPlan
 from core.engine.trading import TradingEngine
-from core.models import TradeSignal
-
 DEFAULT_LIMIT = 150
 DEFAULT_TIMEFRAME = "5m"
 DEFAULT_HIGHER_TIMEFRAMES: Tuple[str, ...] = ("1H",)
@@ -21,10 +19,6 @@ DEFAULT_HIGHER_TIMEFRAMES: Tuple[str, ...] = ("1H",)
 def _parse_timeframes(raw: str) -> Tuple[str, ...]:
     parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
     return tuple(parts)
-
-
-def _fmt_action(signal: TradeSignal) -> str:
-    return f"{signal.action.value.upper():<4} conf={signal.confidence:.2f} size={signal.size:.6f}"
 
 
 def _fmt_plan(plan: Optional[ExecutionPlan]) -> str:

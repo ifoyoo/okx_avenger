@@ -4,6 +4,18 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0025 - 输出层统一采用 summary-first 契约
+- 背景：项目主链路已经可用，但 `config-check`、`status`、runtime 日志、Telegram 通知、backtest 报告仍像不同阶段各写一套，信息虽多但扫读成本高。
+- 决策：
+  - `config-check` 收口为 `CONFIG READY + Account/Runtime/Notify/LLM/Intel` 分组摘要。
+  - `status` 收口为 `Runtime Status` 单页视图，账户/watchlist/positions/heartbeat 使用紧凑 key=value 文案。
+  - runtime 轮次日志统一为 `cycle start / inst result / cycle summary` 三层。
+  - Telegram 不再转发原始 message，而改为事件模板渲染。
+  - backtest/tune 报告增加 summary 首屏，再输出表格和样本。
+- 原因：交付后最常见的动作不是“读源代码”，而是扫一眼 CLI 和通知判断系统状态；输出层必须统一、稳定、低噪声。
+- 影响：命令行、日志和 Telegram 的可读性明显提升；测试锁住新的输出契约；当前 smoke 结果已覆盖 `config-check` 与 `status`。
+- 回滚方案：如后续发现信息压缩过度，可在现有契约上补字段，不恢复旧的散乱输出风格。
+
 ### 2026-04-12 - D0024 - 上线前补齐 release hardening 的四个可信度缺口
 - 背景：项目已基本可交付，但仍有四类会在真实运行中制造误判的问题：`.env` 拼错键会被静默忽略、LLM 被截断时仍可能被当成有效 JSON、runtime 有部分失败仍可能返回 `0`、安装缺少一份已验证的依赖约束。
 - 决策：

@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
+from cli_app.backtest_reporting import format_backtest_summary_lines
 from core.backtest import BacktestResult, run_backtest_from_features
 from core.client import OKXClient
 from core.data.features import candles_to_dataframe
@@ -18,21 +19,8 @@ def _safe_float(value: Any) -> float:
 
 
 def _print_backtest_summary(records: List[Dict[str, Any]]) -> None:
-    if not records:
-        print("暂无回测结果。")
-        return
-    print("=== Backtest Summary ===")
-    print(f"{'inst':<18} {'tf':<5} {'trades':<8} {'win_rate':<9} {'net_pnl':<12} {'max_dd':<8}")
-    print("-" * 70)
-    for item in records:
-        s = item.get("summary") or {}
-        inst = str(s.get("inst_id", "-"))
-        tf = str(s.get("timeframe", "-"))
-        trades = int(_safe_float(s.get("total_trades")))
-        win_rate = _safe_float(s.get("win_rate")) * 100
-        net_pnl = _safe_float(s.get("net_pnl"))
-        max_dd = _safe_float(s.get("max_drawdown")) * 100
-        print(f"{inst:<18} {tf:<5} {trades:<8d} {win_rate:>6.1f}%  {net_pnl:>+10.2f}  {max_dd:>6.1f}%")
+    for line in format_backtest_summary_lines(records):
+        print(line)
 
 
 def _build_features_for_backtest(okx: OKXClient, inst_id: str, timeframe: str, limit: int) -> pd.DataFrame:

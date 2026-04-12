@@ -27,16 +27,18 @@ def test_format_runtime_status_lines_with_position_rows() -> None:
     )
 
     assert lines == [
-        "=== Account ===",
+        "=== Runtime Status ===",
+        "",
+        "Account",
         "equity",
         "",
-        "=== Watchlist ===",
+        "Watchlist",
         "watch",
         "",
-        "=== Position ===",
+        "Positions",
         "pos",
         "",
-        "=== Runtime Heartbeat ===",
+        "Heartbeat",
         "hb",
     ]
 
@@ -51,13 +53,15 @@ def test_format_runtime_status_lines_with_empty_positions() -> None:
     )
 
     assert lines == [
-        "=== Account ===",
+        "=== Runtime Status ===",
         "",
-        "=== Watchlist ===",
+        "Account",
         "",
-        "=== Position ===",
-        "(no positions)",
+        "Watchlist",
         "",
-        "=== Runtime Heartbeat ===",
+        "Positions",
+        "none",
+        "",
+        "Heartbeat",
         "hb",
     ]

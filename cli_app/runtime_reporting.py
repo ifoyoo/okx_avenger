@@ -12,15 +12,17 @@ def format_runtime_status_lines(
 ) -> List[str]:
     positions = list(position_lines)
     return [
-        "=== Account ===",
+        "=== Runtime Status ===",
+        "",
+        "Account",
         *list(account_lines),
         "",
-        "=== Watchlist ===",
+        "Watchlist",
         *list(watchlist_lines),
         "",
-        "=== Position ===",
-        *(positions or ["(no positions)"]),
+        "Positions",
+        *(positions or ["none"]),
         "",
-        "=== Runtime Heartbeat ===",
+        "Heartbeat",
         *list(heartbeat_lines),
     ]

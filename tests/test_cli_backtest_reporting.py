@@ -9,6 +9,7 @@ import importlib.util
 def _load_reporting():
     assert importlib.util.find_spec("cli_app.backtest_reporting") is not None
     module = importlib.import_module("cli_app.backtest_reporting")
+    assert hasattr(module, "format_backtest_summary_lines")
     assert hasattr(module, "format_trade_lines")
     assert hasattr(module, "format_tune_lines")
     return module
@@ -16,6 +17,39 @@ def _load_reporting():
 
 def test_backtest_reporting_module_exists() -> None:
     _load_reporting()
+
+
+def test_format_backtest_summary_lines_adds_report_summary() -> None:
+    reporting = _load_reporting()
+    lines = reporting.format_backtest_summary_lines(
+        [
+            {
+                "summary": {
+                    "inst_id": "BTC-USDT-SWAP",
+                    "timeframe": "5m",
+                    "total_trades": 10,
+                    "win_rate": 0.6,
+                    "net_pnl": 120.0,
+                    "max_drawdown": 0.08,
+                }
+            },
+            {
+                "summary": {
+                    "inst_id": "ETH-USDT-SWAP",
+                    "timeframe": "15m",
+                    "total_trades": 8,
+                    "win_rate": 0.5,
+                    "net_pnl": 80.0,
+                    "max_drawdown": 0.12,
+                }
+            },
+        ]
+    )
+
+    assert lines[0] == "=== Backtest Report ==="
+    assert lines[1] == "summary records=2 total_trades=18 net_pnl=+200.00 best=BTC-USDT-SWAP"
+    assert "inst" in lines[3]
+    assert any("BTC-USDT-SWAP" in line for line in lines)
 
 
 def test_format_trade_lines_limits_latest_rows() -> None:
@@ -35,9 +69,9 @@ def test_format_trade_lines_limits_latest_rows() -> None:
 
     assert lines == [
         "",
-        "=== Trades (latest first) ===",
+        "=== Trade Samples ===",
         "",
-        "[BTC-USDT-SWAP 5m]",
+        "[BTC-USDT-SWAP 5m latest=2]",
         "- BUY  qty=3.000000 entry=30.000000 exit=32.000000 net=+6.0000 held=8",
         "- SELL qty=2.000000 entry=20.000000 exit=19.000000 net=-2.0000 held=5",
     ]
@@ -62,7 +96,7 @@ def test_format_tune_lines_contains_scoreboard_and_regimes() -> None:
     )
 
     assert lines[0] == "=== Backtest Tune ==="
-    assert "instruments=2 lookback_bars=150" in lines[1]
+    assert lines[1] == "leader=alpha score=+0.8000 scanned=2 lookback=150"
     assert any(line.startswith("alpha") and "1.40" in line for line in lines)
     assert any(line.startswith("beta") and "0.90" in line for line in lines)
     assert "[high_vol]" in lines

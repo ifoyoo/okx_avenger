@@ -244,7 +244,36 @@ def test_run_runtime_cycle_returns_one_when_some_orders_fail(monkeypatch) -> Non
     assert len(bundle.notifier.events) == 2
     assert bundle.notifier.events[0].kind == "order_submitted"
     assert bundle.notifier.events[1].kind == "order_failed"
-    assert info_calls[-1] == ("本轮结束：总计 {}，完成 {}，阻断 {}，观望 {}，失败 {}", (2, 1, 0, 0, 1))
+    assert bundle.notifier.events[0].action == "BUY"
+    assert bundle.notifier.events[0].confidence == 0.82
+    assert bundle.notifier.events[1].code == "51000"
+    assert bundle.notifier.events[1].detail == "rejected"
+    assert info_calls[0] == ("cycle start total=2 dry_run=False", ())
+    assert info_calls[-1] == ("cycle summary total=2 completed=1 blocked=0 hold=0 failed=1", ())
+
+
+def test_run_runtime_cycle_logs_compact_per_inst_result(monkeypatch) -> None:
+    runtime_execution = _load_runtime_execution()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}])
+    info_calls = []
+
+    class _Logger:
+        def info(self, message, *args):
+            info_calls.append((message, args))
+
+        def warning(self, message, *args):
+            return None
+
+        def error(self, message, *args):
+            return None
+
+    monkeypatch.setattr(runtime_execution, "logger", _Logger())
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=True)) == 0
+    assert info_calls[1] == (
+        "inst=BTC-USDT-SWAP tf=5m action=BUY conf=0.82 result=dry_run plan=LIMIT slip=0.10%",
+        (),
+    )
 
 
 def test_log_strategy_snapshot_ignores_missing_manager() -> None:
@@ -290,6 +319,8 @@ def test_run_runtime_cycle_sends_blocked_notification() -> None:
     assert len(bundle.notifier.events) == 1
     assert bundle.notifier.events[0].kind == "trade_blocked"
     assert bundle.notifier.events[0].inst_id == "BTC-USDT-SWAP"
+    assert bundle.notifier.events[0].action == "BUY"
+    assert bundle.notifier.events[0].detail == "reason=risk blocked"
 
 
 def test_run_runtime_cycle_sends_order_submitted_notification() -> None:
@@ -327,3 +358,5 @@ def test_run_runtime_cycle_sends_order_submitted_notification() -> None:
     assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
     assert len(bundle.notifier.events) == 1
     assert bundle.notifier.events[0].kind == "order_submitted"
+    assert bundle.notifier.events[0].action == "BUY"
+    assert bundle.notifier.events[0].size == 0.1

@@ -62,13 +62,12 @@ def test_run_config_check_prints_snapshot_and_skips_api_check(monkeypatch, capsy
     assert workflows.run_config_check(argparse.Namespace(api_check=False)) == 0
 
     output = capsys.readouterr().out
-    assert "✅ 本地配置字段完整。" in output
-    assert "- notify_enabled: True" in output
-    assert "- notify_level: orders" in output
-    assert "- llm_model: gpt-x" in output
-    assert "- news_provider: newsapi" in output
-    assert "- config_snapshot: data/snapshot.json" in output
-    assert "ℹ️ 未执行 API 联通性检查" in output
+    assert "CONFIG READY" in output
+    assert "Notify   on level=orders" in output
+    assert "LLM      on model=gpt-x base=https://api.example.com" in output
+    assert "Intel    on provider=newsapi providers=newsapi,coingecko cg_key=yes" in output
+    assert "snapshot data/snapshot.json" in output
+    assert "api_check skipped" in output
 
 
 def test_run_config_check_returns_one_when_api_check_fails(monkeypatch, capsys) -> None:
