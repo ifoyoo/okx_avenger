@@ -4,6 +4,16 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0022 - 清理死配置并让 `FEATURE_LIMIT` 真正控制运行默认值
+- 背景：用户检查 `.env` 时发现运行参数很多，但其中 `PROTECTION_MONITOR_INTERVAL_SECONDS` 并未接入主链路；同时 `FEATURE_LIMIT` 虽存在于配置模型中，却没有真正驱动 `once/run` 的 CLI 默认 `--limit`。
+- 决策：
+  - 删除未接线的 `PROTECTION_MONITOR_INTERVAL_SECONDS` 配置。
+  - `cli_app.runtime_parser` 改为从 `settings.runtime.feature_limit` 读取默认 `--limit`。
+  - `.env` 默认值下调为更稳的基线：`BALANCE_USAGE_RATIO=0.5`、`FEATURE_LIMIT=180`、`DEFAULT_TAKE_PROFIT_PCT=0.06`、`DEFAULT_STOP_LOSS_PCT=0.03`；`DEFAULT_LEVERAGE` 保持不动，避免与账户真实杠杆脱节。
+- 原因：配置项必须“写了就生效”，否则只会制造错觉；同时原 25%/10% 的全局 TP/SL 对 5m 主周期过宽，几乎失去保护意义。
+- 影响：运行默认 K 线数量现在确实受 `.env` 控制；配置面更干净；全局 TP/SL 更贴近短周期实盘/回测语义。
+- 回滚方案：若后续需要独立后台保护线程，应基于真实接入点重新引入对应配置，而不是恢复这次删除的死字段。
+
 ### 2026-04-12 - D0021 - 止盈止损统一为“规则意图 + 入场价解析”单一契约
 - 背景：原有 TP/SL 同时存在策略侧目标构造、执行层 attach-algo 转换和回测忽略保护的问题；`ratio` 旧写法在 watchlist 测试中出现，但主实现只认 `percent`。
 - 决策：

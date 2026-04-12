@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from types import SimpleNamespace
 
 from cli import build_parser
 from cli_app.backtest_parser import register_backtest_commands
 from cli_app.config_parser import register_config_commands
+import cli_app.runtime_parser as runtime_parser
 from cli_app.runtime_parser import register_runtime_commands
 from cli_app.strategies_parser import register_strategy_commands
 
@@ -91,6 +93,21 @@ def test_runtime_parser_module_registers_status() -> None:
     args = parser.parse_args(["status"])
 
     assert args.command == "status"
+
+
+def test_runtime_parser_uses_feature_limit_setting(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_parser,
+        "get_settings",
+        lambda: SimpleNamespace(runtime=SimpleNamespace(feature_limit=240)),
+    )
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    register_runtime_commands(sub)
+    args = parser.parse_args(["once", "--inst", "BTC-USDT-SWAP"])
+
+    assert args.limit == 240
 
 
 def test_config_parser_module_registers_api_check() -> None:

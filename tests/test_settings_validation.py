@@ -38,6 +38,7 @@ def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
 
     assert not hasattr(runtime, "app_version")
     assert not hasattr(runtime, "app_author")
+    assert not hasattr(runtime, "protection_monitor_interval_seconds")
 
 
 def test_build_and_dump_config_snapshot(tmp_path) -> None:

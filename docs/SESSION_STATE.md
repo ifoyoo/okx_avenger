@@ -30,6 +30,23 @@
 
 ## 最近完成项（最新一条放最上）
 - 时间：2026-04-12
+- 节点：配置面优化 - 删除死配置并收紧默认运行参数
+- 目标：回答“这些 `.env` 项到底有没有用”，并把当前真正生效的运行参数收敛到可解释、可用的范围。
+- 结果：完成。已删除未接线的 `PROTECTION_MONITOR_INTERVAL_SECONDS`；`FEATURE_LIMIT` 现在真实控制 `once/run` 的默认 `--limit`；`.env` 默认值调整为 `BALANCE_USAGE_RATIO=0.5`、`FEATURE_LIMIT=180`、`DEFAULT_TAKE_PROFIT_PCT=0.06`、`DEFAULT_STOP_LOSS_PCT=0.03`；`DEFAULT_LEVERAGE` 保持 10，不擅自偏离账户实际杠杆语义。
+- 变更文件：
+  - `config/settings.py`
+  - `cli_app/runtime_parser.py`
+  - `.env`
+  - `README.md`
+  - `tests/test_cli_parser.py`
+  - `tests/test_settings_validation.py`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_cli_parser.py tests/test_settings_validation.py tests/test_cli_config_reporting.py tests/test_cli_config_workflows.py` -> `23 passed`
+
+- 时间：2026-04-12
 - 节点：TP/SL 重构 - 统一保护规则解析链路
 - 目标：重构止盈止损，使策略输出、执行 attach-algo 与回测退出共享同一套保护规则语义，并补上回测对保护位的真实消费。
 - 结果：完成。`TradeSignal.protection` 现只携带 `ProtectionRule`；新增 `resolve_trade_protection()` 统一按入场价/ATR 解析；支持 `rr` 止盈与 `ratio -> percent` 归一；回测开仓后会在同根执行 bar 检查 TP/SL，并输出 `take_profit` / `stop_loss` 退出原因。

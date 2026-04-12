@@ -112,9 +112,6 @@ class RuntimeSettings(SettingsBase):
     feature_min_samples: int = Field(80, alias="FEATURE_MIN_SAMPLES")
     feature_indicator_overrides: str = Field("", alias="FEATURE_INDICATOR_OVERRIDES")
     log_dir: str = Field("logs", alias="LOG_DIR")
-    protection_monitor_interval_seconds: float = Field(
-        30.0, alias="PROTECTION_MONITOR_INTERVAL_SECONDS"
-    )
     data_staleness_seconds: int = Field(180, alias="DATA_STALENESS_SECONDS")
     execution_pending_timeout_seconds: float = Field(0.0, alias="EXECUTION_PENDING_TIMEOUT_SECONDS")
     execution_reconcile_position: bool = Field(True, alias="EXECUTION_RECONCILE_POSITION")
