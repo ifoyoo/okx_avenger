@@ -25,7 +25,6 @@ def _settings(*, missing=False, llm_enabled=False, news_enabled=False):
             okx_base_url="https://www.okx.com",
         ),
         runtime=SimpleNamespace(
-            watchlist_mode="manual",
             run_interval_minutes=5,
             config_snapshot_path="data/config.snapshot.json",
         ),

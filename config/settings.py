@@ -114,17 +114,6 @@ class RuntimeSettings(SettingsBase):
     log_dir: str = Field("logs", alias="LOG_DIR")
     app_version: str = Field("0.1.0", alias="APP_VERSION")
     app_author: str = Field("余韵的左手（laofan_Fucker）", alias="APP_AUTHOR")
-    watchlist_mode: str = Field("manual", alias="WATCHLIST_MODE")
-    auto_watchlist_size: int = Field(5, alias="AUTO_WATCHLIST_SIZE")
-    auto_watchlist_top_n: int = Field(10, alias="AUTO_WATCHLIST_TOP_N")
-    auto_watchlist_refresh_hours: int = Field(24, alias="AUTO_WATCHLIST_REFRESH_HOURS")
-    auto_watchlist_cache: str = Field("data/auto_watchlist.json", alias="AUTO_WATCHLIST_CACHE")
-    auto_watchlist_timeframe: str = Field("5m", alias="AUTO_WATCHLIST_TIMEFRAME")
-    auto_watchlist_higher_timeframes: str = Field("1H", alias="AUTO_WATCHLIST_HIGHER_TIMEFRAMES")
-    auto_watchlist_max_spread_ratio: float = Field(0.003, alias="AUTO_WATCHLIST_MAX_SPREAD_RATIO")
-    auto_watchlist_max_range_ratio_24h: float = Field(0.18, alias="AUTO_WATCHLIST_MAX_RANGE_RATIO_24H")
-    auto_watchlist_min_notional_24h: float = Field(5_000_000.0, alias="AUTO_WATCHLIST_MIN_NOTIONAL_24H")
-    auto_watchlist_max_same_base: int = Field(1, alias="AUTO_WATCHLIST_MAX_SAME_BASE")
     protection_monitor_interval_seconds: float = Field(
         30.0, alias="PROTECTION_MONITOR_INTERVAL_SECONDS"
     )
@@ -134,37 +123,15 @@ class RuntimeSettings(SettingsBase):
     config_snapshot_path: str = Field("data/config_snapshot.json", alias="CONFIG_SNAPSHOT_PATH")
     runtime_heartbeat_path: str = Field("data/runtime_heartbeat.json", alias="RUNTIME_HEARTBEAT_PATH")
 
-    @field_validator("watchlist_mode", mode="before")
-    @classmethod
-    def _normalize_watchlist_mode(cls, value: Optional[str]) -> str:
-        mode = str(value or "manual").strip().lower()
-        if mode not in {"manual", "auto", "mixed"}:
-            raise ValueError("WATCHLIST_MODE must be one of manual/auto/mixed")
-        return mode
-
     @field_validator(
         "run_interval_minutes",
         "feature_min_samples",
-        "auto_watchlist_size",
-        "auto_watchlist_top_n",
         mode="after",
     )
     @classmethod
     def _validate_positive_int(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("value must be > 0")
-        return value
-
-    @field_validator(
-        "auto_watchlist_max_spread_ratio",
-        "auto_watchlist_max_range_ratio_24h",
-        "auto_watchlist_min_notional_24h",
-        mode="after",
-    )
-    @classmethod
-    def _validate_non_negative_float(cls, value: float) -> float:
-        if value < 0:
-            raise ValueError("value must be >= 0")
         return value
 
 
@@ -303,10 +270,6 @@ def build_config_snapshot(settings: AppSettings) -> Dict[str, Any]:
             "default_max_position": settings.runtime.default_max_position,
             "feature_limit": settings.runtime.feature_limit,
             "feature_min_samples": settings.runtime.feature_min_samples,
-            "watchlist_mode": settings.runtime.watchlist_mode,
-            "auto_watchlist_size": settings.runtime.auto_watchlist_size,
-            "auto_watchlist_top_n": settings.runtime.auto_watchlist_top_n,
-            "auto_watchlist_refresh_hours": settings.runtime.auto_watchlist_refresh_hours,
             "data_staleness_seconds": settings.runtime.data_staleness_seconds,
             "execution_pending_timeout_seconds": settings.runtime.execution_pending_timeout_seconds,
             "execution_reconcile_position": settings.runtime.execution_reconcile_position,

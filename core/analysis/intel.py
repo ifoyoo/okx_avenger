@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
+import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import requests
@@ -328,12 +329,10 @@ class NewsHeadline:
     published_at: str = ""
     url: str = ""
     sentiment: float = 0.0
-    event_tags: List[str] = None
+    event_tags: List[str] = field(default_factory=list)
     risk_weight: float = 0.0
-
-    def __post_init__(self) -> None:
-        if self.event_tags is None:
-            self.event_tags = []
+    relevance_score: float = 0.0
+    matched_aliases: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -350,12 +349,12 @@ class MarketIntelSnapshot:
     event_risk_score: float
     summary: str
     headlines: List[NewsHeadline]
-    providers: List[str] = None
+    providers: List[str] = field(default_factory=list)
     coverage_count: int = 0
-
-    def __post_init__(self) -> None:
-        if self.providers is None:
-            self.providers = []
+    analysis_version: str = "v2"
+    matched_aliases: List[str] = field(default_factory=list)
+    avg_relevance_score: float = 0.0
+    provider_counts: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -370,6 +369,10 @@ class MarketIntelSnapshot:
             "headlines": [item.to_dict() for item in self.headlines],
             "providers": list(self.providers),
             "coverage_count": self.coverage_count,
+            "analysis_version": self.analysis_version,
+            "matched_aliases": list(self.matched_aliases),
+            "avg_relevance_score": self.avg_relevance_score,
+            "provider_counts": dict(self.provider_counts),
         }
 
 
@@ -493,19 +496,23 @@ class NewsIntelCollector:
         query = self.resolve_query(inst_id, query_override=query_override, symbol_aliases=symbol_aliases)
         if not query:
             return None
+        aliases = self.resolve_alias_terms(inst_id, symbol_aliases=symbol_aliases)
         articles, active_providers = self._fetch_articles(
             inst_id=inst_id,
             query=query,
             coin_id_override=coin_id_override,
             symbol_aliases=symbol_aliases,
         )
-        articles = sorted(articles, key=self._article_sort_key, reverse=True)
+        articles = self._filter_and_score_articles(articles, aliases)
+        articles = sorted(articles, key=self._article_rank_key, reverse=True)
         if not articles:
             return None
         headlines: List[NewsHeadline] = []
-        total = 0.0
+        weighted_sentiment_total = 0.0
+        sentiment_weight_total = 0.0
         risk_tags: List[str] = []
         event_weights: Dict[str, float] = {}
+        matched_aliases: Set[str] = set()
         seen = set()
         for item in articles:
             title = str(item.get("title") or "").strip()
@@ -531,20 +538,26 @@ class NewsIntelCollector:
                 continue
             seen.add(dedupe_key)
             url = str(item.get("url") or "")
+            relevance_score = max(0.0, min(1.0, float(item.get("_relevance_score") or 0.0)))
+            headline_aliases = list(item.get("_matched_aliases") or [])
+            matched_aliases.update(headline_aliases)
             sentiment = 0.0
             local_tags: List[str] = []
             local_events: Dict[str, float] = {}
             body = f"{title}\n{item.get('description') or ''}\n{item.get('content') or ''}"
             if self.sentiment_enabled:
                 sentiment, local_tags = _score_text(body)
-                total += sentiment
+                weight = max(0.2, relevance_score)
+                weighted_sentiment_total += sentiment * weight
+                sentiment_weight_total += weight
                 risk_tags.extend(local_tags)
             if self.event_tag_enabled:
                 local_events = _detect_event_tags(body)
                 for tag, weight in local_events.items():
                     prev = event_weights.get(tag, 0.0)
-                    if weight > prev:
-                        event_weights[tag] = weight
+                    weighted = min(1.0, weight * (0.5 + 0.5 * relevance_score))
+                    if weighted > prev:
+                        event_weights[tag] = round(weighted, 3)
             headlines.append(
                 NewsHeadline(
                     title=title,
@@ -555,21 +568,30 @@ class NewsIntelCollector:
                     sentiment=sentiment,
                     event_tags=sorted(local_events.keys()),
                     risk_weight=max(local_events.values()) if local_events else 0.0,
+                    relevance_score=relevance_score,
+                    matched_aliases=headline_aliases,
                 )
             )
             if len(headlines) >= self.limit:
                 break
         if not headlines:
             return None
-        score = total / len(headlines) if headlines else 0.0
+        score = weighted_sentiment_total / sentiment_weight_total if sentiment_weight_total > 0 else 0.0
         score = max(-1.0, min(1.0, score))
         event_tags = dict(sorted(event_weights.items(), key=lambda item: item[0]))
         event_risk_score = max(event_tags.values()) if event_tags else 0.0
+        avg_relevance_score = (
+            sum(item.relevance_score for item in headlines) / len(headlines)
+            if headlines else 0.0
+        )
+        provider_counts = self._collect_provider_counts(headlines)
         summary = self._build_summary(
             headlines=headlines,
             score=score,
             event_tags=event_tags,
             event_risk_score=event_risk_score,
+            avg_relevance_score=avg_relevance_score,
+            provider_counts=provider_counts,
         )
         unique_risks = sorted(set(risk_tags))
         return MarketIntelSnapshot(
@@ -584,6 +606,9 @@ class NewsIntelCollector:
             headlines=headlines[: self.limit],
             providers=active_providers,
             coverage_count=len(headlines),
+            matched_aliases=sorted(matched_aliases),
+            avg_relevance_score=round(avg_relevance_score, 3),
+            provider_counts=provider_counts,
         )
 
     def _fetch_articles(
@@ -628,6 +653,127 @@ class NewsIntelCollector:
         if published is None:
             return 0.0
         return float(published.timestamp())
+
+    @classmethod
+    def _article_rank_key(cls, item: Dict[str, Any]) -> Tuple[float, float]:
+        relevance = max(0.0, min(1.0, float(item.get("_relevance_score") or 0.0)))
+        provider_priority = cls._provider_priority(str(item.get("_provider") or ""))
+        return relevance, cls._article_sort_key(item), float(provider_priority)
+
+    @staticmethod
+    def _provider_priority(provider: str) -> int:
+        normalized = str(provider or "").strip().lower()
+        if normalized == "newsapi":
+            return 2
+        if normalized == "coingecko":
+            return 1
+        return 0
+
+    def _filter_and_score_articles(
+        self,
+        articles: Sequence[Dict[str, Any]],
+        aliases: Sequence[str],
+    ) -> List[Dict[str, Any]]:
+        if not articles:
+            return []
+        minimum = self._min_relevance_threshold(aliases)
+        filtered: List[Dict[str, Any]] = []
+        for item in articles:
+            relevance_score, matched_aliases = self._score_article_relevance(item, aliases)
+            if relevance_score + 1e-12 < minimum:
+                continue
+            article = dict(item)
+            article["_relevance_score"] = round(relevance_score, 3)
+            article["_matched_aliases"] = matched_aliases
+            filtered.append(article)
+        return filtered
+
+    @staticmethod
+    def _min_relevance_threshold(aliases: Sequence[str]) -> float:
+        lengths = [len(_normalize_match_token(item)) for item in aliases if _normalize_match_token(item)]
+        if not lengths:
+            return 0.0
+        if all(length <= 4 for length in lengths):
+            return 0.55
+        if any(length <= 4 for length in lengths):
+            return 0.5
+        return 0.35
+
+    @classmethod
+    def _score_article_relevance(
+        cls,
+        article: Dict[str, Any],
+        aliases: Sequence[str],
+    ) -> Tuple[float, List[str]]:
+        title = str(article.get("title") or "")
+        description = str(article.get("description") or "")
+        content = str(article.get("content") or "")
+        url = str(article.get("url") or "")
+
+        matched_aliases: List[str] = []
+        score = 0.0
+        for alias in aliases:
+            alias_text = str(alias or "").strip()
+            if not alias_text:
+                continue
+            alias_len = len(_normalize_match_token(alias_text))
+            title_hit = cls._alias_match_score(title, alias_text)
+            description_hit = cls._alias_match_score(description, alias_text)
+            content_hit = cls._alias_match_score(content, alias_text)
+            url_hit = cls._alias_match_score(url, alias_text)
+            alias_score = 0.0
+            if title_hit:
+                alias_score += 0.64 if alias_len <= 4 else 0.58
+            if description_hit:
+                alias_score += 0.18 if alias_len <= 4 else 0.24
+            if content_hit:
+                alias_score += 0.12 if alias_len <= 4 else 0.16
+            if url_hit:
+                alias_score += 0.1
+            alias_score = min(1.0, alias_score)
+            if alias_score <= 0:
+                continue
+            matched_aliases.append(alias_text)
+            score = max(score, alias_score)
+        unique_aliases = []
+        seen: Set[str] = set()
+        for alias in matched_aliases:
+            if alias.lower() in seen:
+                continue
+            seen.add(alias.lower())
+            unique_aliases.append(alias)
+        return score, unique_aliases
+
+    @staticmethod
+    def _alias_match_score(value: str, alias: str) -> bool:
+        haystack = str(value or "").strip()
+        needle = str(alias or "").strip()
+        if not haystack or not needle:
+            return False
+        haystack_lower = haystack.lower()
+        needle_lower = needle.lower()
+        normalized_alias = _normalize_text(needle_lower)
+        alias_token = _normalize_match_token(needle_lower)
+        haystack_token = _normalize_match_token(haystack_lower)
+        token_len = len(alias_token)
+        if not alias_token:
+            return False
+        if token_len <= 4:
+            boundary_pattern = r"(?<![a-z0-9])" + re.escape(needle_lower) + r"(?![a-z0-9])"
+            if re.search(boundary_pattern, haystack_lower):
+                return True
+            return alias_token in haystack_token and token_len > 2 and haystack_lower.startswith("http")
+        if normalized_alias in _normalize_text(haystack_lower):
+            return True
+        return alias_token in haystack_token
+
+    @staticmethod
+    def _collect_provider_counts(headlines: Sequence[NewsHeadline]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for item in headlines:
+            provider = str(item.provider or "").strip() or "unknown"
+            counts[provider] = counts.get(provider, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: item[0]))
 
     def _fetch_newsapi(self, query: str) -> List[Dict[str, Any]]:
         from_time = datetime.now(timezone.utc) - timedelta(hours=self.window_hours)
@@ -833,6 +979,8 @@ class NewsIntelCollector:
         score: float,
         event_tags: Dict[str, float],
         event_risk_score: float,
+        avg_relevance_score: float,
+        provider_counts: Dict[str, int],
     ) -> str:
         mood = "中性"
         if score >= 0.2:
@@ -843,9 +991,13 @@ class NewsIntelCollector:
         if event_tags:
             parts = [f"{tag}:{weight:.2f}" for tag, weight in sorted(event_tags.items())]
             event_text = f"事件标签: {', '.join(parts)} (max={event_risk_score:.2f})"
+        provider_text = "providers: 无"
+        if provider_counts:
+            provider_text = "providers: " + ", ".join(f"{name}={count}" for name, count in sorted(provider_counts.items()))
         top = [f"- {item.title}" for item in headlines[:3]]
         return (
             f"新闻情绪 {mood} (score={score:+.2f})\n"
+            f"相关性均值 {avg_relevance_score:.2f}; {provider_text}\n"
             f"{event_text}\n"
             + "\n".join(top)
         )

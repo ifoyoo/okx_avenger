@@ -63,8 +63,8 @@ def test_news_intel_collector_collect(monkeypatch) -> None:
                         "url": "https://x/b",
                     },
                     {
-                        "title": "Security breach sparks fear",
-                        "description": "possible hack event",
+                        "title": "Bitcoin security breach sparks fear",
+                        "description": "possible bitcoin hack event",
                         "source": {"name": "demo2"},
                         "publishedAt": "2026-01-01T00:02:00Z",
                         "url": "https://x/c",
@@ -248,8 +248,8 @@ def test_news_intel_collector_aggregate_multiple_providers(monkeypatch) -> None:
                 "_provider": "coingecko",
             },
             {
-                "title": "Exchange hack sparks fear",
-                "description": "possible exploit",
+                "title": "Bitcoin exchange hack sparks fear",
+                "description": "possible bitcoin exploit",
                 "source": {"name": "alert"},
                 "publishedAt": "2026-01-01T00:20:00Z",
                 "url": "https://cg/2",
@@ -266,7 +266,8 @@ def test_news_intel_collector_aggregate_multiple_providers(monkeypatch) -> None:
     assert snapshot.coverage_count == 2
     assert len(snapshot.headlines) == 2
     assert {item.provider for item in snapshot.headlines} == {"newsapi", "coingecko"}
-    assert "macro" in snapshot.event_tags
+    assert "security" in snapshot.event_tags
+    assert snapshot.provider_counts == {"coingecko": 1, "newsapi": 1}
 
 
 def test_news_intel_collector_resolve_coin_id_prefers_override_and_map() -> None:
@@ -357,3 +358,155 @@ def test_coingecko_generic_feed_is_filtered_by_alias_relevance(monkeypatch) -> N
     assert snapshot is not None
     assert len(snapshot.headlines) == 1
     assert snapshot.headlines[0].title == "Jelly-My-Jelly expands ecosystem"
+
+
+def test_newsapi_articles_are_filtered_by_alias_relevance(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        news_enabled=True,
+        news_provider="newsapi",
+        news_providers="newsapi",
+        news_api_base="https://example.com/v2/everything",
+        news_api_key="news-k",
+        news_timeout_seconds=3.0,
+        news_limit=10,
+        news_window_hours=24,
+        sentiment_enabled=True,
+        news_symbol_aliases="",
+        news_coin_ids="",
+        news_source_whitelist="",
+        news_source_blacklist="",
+        news_dedupe_window_minutes=120,
+        event_tag_enabled=True,
+    )
+    collector = NewsIntelCollector(settings)
+
+    monkeypatch.setattr(
+        collector,
+        "_fetch_newsapi",
+        lambda query: [
+            {
+                "title": "Open Loot expands creator ecosystem",
+                "description": "Open Loot partnership attracts new studios",
+                "source": {"name": "wire"},
+                "publishedAt": "2026-01-01T00:00:00Z",
+                "url": "https://n/1",
+                "_provider": "newsapi",
+            },
+            {
+                "title": "Open market activity remains weak",
+                "description": "Loot boxes in gaming remain controversial",
+                "source": {"name": "wire"},
+                "publishedAt": "2026-01-01T00:05:00Z",
+                "url": "https://n/2",
+                "_provider": "newsapi",
+            },
+        ],
+    )
+
+    snapshot = collector.collect(
+        "OL-USDT-SWAP",
+        symbol_aliases=("Open Loot", "OpenLoot"),
+    )
+
+    assert snapshot is not None
+    assert len(snapshot.headlines) == 1
+    assert snapshot.headlines[0].title == "Open Loot expands creator ecosystem"
+
+
+def test_headline_exposes_relevance_score_and_matched_aliases(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        news_enabled=True,
+        news_provider="newsapi",
+        news_providers="newsapi",
+        news_api_base="https://example.com/v2/everything",
+        news_api_key="news-k",
+        news_timeout_seconds=3.0,
+        news_limit=10,
+        news_window_hours=24,
+        sentiment_enabled=True,
+        news_symbol_aliases="",
+        news_coin_ids="",
+        news_source_whitelist="",
+        news_source_blacklist="",
+        news_dedupe_window_minutes=120,
+        event_tag_enabled=True,
+    )
+    collector = NewsIntelCollector(settings)
+
+    monkeypatch.setattr(
+        collector,
+        "_fetch_newsapi",
+        lambda query: [
+            {
+                "title": "Bitcoin rally after ETF inflow",
+                "description": "Bitcoin adoption rises again",
+                "source": {"name": "wire"},
+                "publishedAt": "2026-01-01T00:00:00Z",
+                "url": "https://n/1",
+                "_provider": "newsapi",
+            }
+        ],
+    )
+
+    snapshot = collector.collect(
+        "BTC-USDT-SWAP",
+        symbol_aliases=("Bitcoin", "BTC"),
+    )
+
+    assert snapshot is not None
+    assert snapshot.analysis_version == "v2"
+    assert snapshot.headlines[0].relevance_score > 0.5
+    assert "Bitcoin" in snapshot.headlines[0].matched_aliases
+    assert snapshot.avg_relevance_score > 0.0
+
+
+def test_sentiment_is_weighted_by_relevance(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        news_enabled=True,
+        news_provider="newsapi",
+        news_providers="newsapi",
+        news_api_base="https://example.com/v2/everything",
+        news_api_key="news-k",
+        news_timeout_seconds=3.0,
+        news_limit=10,
+        news_window_hours=24,
+        sentiment_enabled=True,
+        news_symbol_aliases="",
+        news_coin_ids="",
+        news_source_whitelist="",
+        news_source_blacklist="",
+        news_dedupe_window_minutes=120,
+        event_tag_enabled=True,
+    )
+    collector = NewsIntelCollector(settings)
+
+    monkeypatch.setattr(
+        collector,
+        "_fetch_newsapi",
+        lambda query: [
+            {
+                "title": "Bitcoin rally after ETF inflow",
+                "description": "Bitcoin approval drives adoption and breakout",
+                "source": {"name": "wire"},
+                "publishedAt": "2026-01-01T00:00:00Z",
+                "url": "https://n/1",
+                "_provider": "newsapi",
+            },
+            {
+                "title": "Crypto market faces hack concerns",
+                "description": "A generic security breach headline mentions BTC once in passing",
+                "source": {"name": "wire2"},
+                "publishedAt": "2026-01-01T00:10:00Z",
+                "url": "https://n/2",
+                "_provider": "newsapi",
+            },
+        ],
+    )
+
+    snapshot = collector.collect(
+        "BTC-USDT-SWAP",
+        symbol_aliases=("Bitcoin", "BTC"),
+    )
+
+    assert snapshot is not None
+    assert snapshot.sentiment_score > 0.2

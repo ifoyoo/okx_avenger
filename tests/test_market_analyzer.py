@@ -189,6 +189,35 @@ class TestMarketAnalyzer:
         assert isinstance(result.resistance_levels, list)
         assert isinstance(result.risk_factors, list)
 
+    def test_analysis_exposes_structured_assessments(self, analyzer, sample_features):
+        result = analyzer.analyze(
+            inst_id="BTC-USDT-SWAP",
+            timeframe="5m",
+            features=sample_features,
+        )
+
+        assert result.analysis_version == "v2"
+        assert result.trend.direction in {"bullish", "bearish", "range"}
+        assert 0 <= result.trend.strength <= 1
+        assert result.momentum.label in {"overbought", "oversold", "bullish", "bearish", "neutral"}
+        assert -1 <= result.momentum.score <= 1
+        assert isinstance(result.levels.supports, list)
+        assert isinstance(result.levels.resistances, list)
+        assert isinstance(result.risk.factors, list)
+
+    def test_legacy_fields_are_backfilled_from_assessments(self, analyzer, sample_features):
+        result = analyzer.analyze(
+            inst_id="BTC-USDT-SWAP",
+            timeframe="5m",
+            features=sample_features,
+        )
+
+        assert result.trend_strength == result.trend.strength
+        assert result.momentum_score == result.momentum.score
+        assert result.support_levels == result.levels.supports
+        assert result.resistance_levels == result.levels.resistances
+        assert result.risk_factors == result.risk.factors
+
     def test_support_resistance_detection(self, analyzer, sample_features):
         df = sample_features.copy()
         for idx in range(len(df)):
@@ -206,6 +235,31 @@ class TestMarketAnalyzer:
         assert len(result.support_levels) >= 1
         assert len(result.resistance_levels) >= 1
         assert "支撑位" in result.text or "阻力位" in result.text
+
+    def test_bearish_sample_produces_bearish_trend_label(self, analyzer, sample_features):
+        df = sample_features.copy()
+        df["open"] = [200 - i * 0.75 for i in range(len(df))]
+        df["high"] = [201 - i * 0.75 for i in range(len(df))]
+        df["low"] = [199 - i * 0.75 for i in range(len(df))]
+        df["close"] = [200 - i * 0.8 for i in range(len(df))]
+        df["ema_fast"] = [200 - i * 0.9 for i in range(len(df))]
+        df["ema_slow"] = [200 - i * 0.6 for i in range(len(df))]
+        df["adx"] = [35.0 for _ in range(len(df))]
+        df["adx_pos"] = [12.0 for _ in range(len(df))]
+        df["adx_neg"] = [28.0 for _ in range(len(df))]
+        df["rsi"] = [35.0 for _ in range(len(df))]
+        df["stoch_k"] = [30.0 for _ in range(len(df))]
+        df["stoch_d"] = [35.0 for _ in range(len(df))]
+        df["williams_r"] = [-65.0 for _ in range(len(df))]
+
+        result = analyzer.analyze(
+            inst_id="BTC-USDT-SWAP",
+            timeframe="5m",
+            features=df,
+        )
+
+        assert result.trend.direction == "bearish"
+        assert "下跌" in result.text or "看跌" in result.text
 
 
 if __name__ == "__main__":

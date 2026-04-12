@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -14,27 +14,92 @@ from .logger import build_performance_hint
 
 
 @dataclass
+class TrendAssessment:
+    direction: str = "range"
+    strength: float = 0.0
+    label: str = "震荡整理"
+    ema_gap_pct: float = 0.0
+    adx: float = 0.0
+    higher_timeframe_alignment: float = 0.0
+
+
+@dataclass
+class MomentumAssessment:
+    score: float = 0.0
+    label: str = "neutral"
+    rsi: float = 50.0
+    macd_bias: str = "neutral"
+    stoch_bias: str = "neutral"
+    williams_bias: str = "neutral"
+
+
+@dataclass
+class LevelAssessment:
+    supports: List[float] = field(default_factory=list)
+    resistances: List[float] = field(default_factory=list)
+    nearest_support: Optional[float] = None
+    nearest_resistance: Optional[float] = None
+    range_position: Optional[float] = None
+
+
+@dataclass
+class RiskAssessment:
+    factors: List[str] = field(default_factory=list)
+    volatility_ratio: float = 0.0
+    regime: str = "normal"
+    account_pressure: float = 0.0
+
+
+@dataclass
 class MarketAnalysis:
     """市场分析结果."""
 
-    text: str  # 结构化分析文本
-    summary: str  # 市场摘要
-    history_hint: str  # 历史表现提示
+    text: str
+    summary: str
+    history_hint: str
 
-    # 新增：结构化数据（阶段 2-3 实现）
-    trend_strength: float = 0.5  # 趋势强度 0-1
-    momentum_score: float = 0.0  # 动量评分 -1 到 1
-    support_levels: List[float] = None  # 支撑位
-    resistance_levels: List[float] = None  # 阻力位
-    risk_factors: List[str] = None  # 风险因素
+    trend_strength: float = 0.5
+    momentum_score: float = 0.0
+    support_levels: List[float] = field(default_factory=list)
+    resistance_levels: List[float] = field(default_factory=list)
+    risk_factors: List[str] = field(default_factory=list)
 
-    def __post_init__(self):
-        if self.support_levels is None:
-            self.support_levels = []
-        if self.resistance_levels is None:
-            self.resistance_levels = []
-        if self.risk_factors is None:
-            self.risk_factors = []
+    trend: TrendAssessment = field(default_factory=TrendAssessment)
+    momentum: MomentumAssessment = field(default_factory=MomentumAssessment)
+    levels: LevelAssessment = field(default_factory=LevelAssessment)
+    risk: RiskAssessment = field(default_factory=RiskAssessment)
+    analysis_version: str = "v2"
+
+    def __post_init__(self) -> None:
+        if self.trend.strength == 0.0 and self.trend_strength != 0.0:
+            self.trend.strength = float(self.trend_strength)
+        else:
+            self.trend_strength = float(self.trend.strength)
+
+        if self.momentum.score == 0.0 and self.momentum_score != 0.0:
+            self.momentum.score = float(self.momentum_score)
+        else:
+            self.momentum_score = float(self.momentum.score)
+
+        if not self.levels.supports and self.support_levels:
+            self.levels.supports = list(self.support_levels)
+        else:
+            self.support_levels = list(self.levels.supports)
+
+        if not self.levels.resistances and self.resistance_levels:
+            self.levels.resistances = list(self.resistance_levels)
+        else:
+            self.resistance_levels = list(self.levels.resistances)
+
+        if self.levels.nearest_support is None and self.levels.supports:
+            self.levels.nearest_support = max(self.levels.supports)
+        if self.levels.nearest_resistance is None and self.levels.resistances:
+            self.levels.nearest_resistance = min(self.levels.resistances)
+
+        if not self.risk.factors and self.risk_factors:
+            self.risk.factors = list(self.risk_factors)
+        else:
+            self.risk_factors = list(self.risk.factors)
 
 
 class MarketAnalyzer:
@@ -42,7 +107,6 @@ class MarketAnalyzer:
 
     def __init__(self, settings: AppSettings) -> None:
         self.settings = settings
-        # 不再需要 AI 配置
 
     def analyze(
         self,
@@ -59,95 +123,181 @@ class MarketAnalyzer:
     ) -> MarketAnalysis:
         """执行市场分析（纯技术指标 + 结构）."""
 
-        # 1. 生成市场摘要（复用现有逻辑）
-        summary_text = build_market_summary(
-            features.tail(25), higher_features, snapshot
-        )
+        del position_entries, perf_stats, daily_stats
 
-        # 2. 历史表现提示
+        summary_text = build_market_summary(features.tail(25), higher_features, snapshot)
         history_hint = build_performance_hint(inst_id, timeframe)
 
-        # 3. 趋势强度分析（阶段 2-3 实现）
-        trend_strength = self._calculate_trend_strength(features, higher_features)
-
-        # 4. 动量评分（阶段 2 实现）
-        momentum_score = self._calculate_momentum(features)
-
-        # 5. 支撑/阻力位（阶段 3 实现）
-        support_levels, resistance_levels = self._find_support_resistance(features)
-
-        # 6. 风险因素识别
-        risk_factors = self._identify_risks(
-            features, higher_features, risk_note, account_snapshot
+        trend = self._assess_trend(features, higher_features)
+        momentum = self._assess_momentum(features)
+        levels = self._assess_levels(features)
+        risk = self._assess_risk(
+            features=features,
+            higher_features=higher_features,
+            risk_note=risk_note,
+            account_snapshot=account_snapshot,
+            levels=levels,
         )
-
-        # 7. 生成结构化分析文本
         analysis_text = self._compose_analysis_text(
-            inst_id,
-            timeframe,
-            features,
-            higher_features,
-            trend_strength,
-            momentum_score,
-            support_levels,
-            resistance_levels,
-            risk_factors,
-            account_snapshot,
-            perf_stats,
-            daily_stats,
+            inst_id=inst_id,
+            timeframe=timeframe,
+            latest=features.iloc[-1],
+            trend=trend,
+            momentum=momentum,
+            levels=levels,
+            risk=risk,
+            account_snapshot=account_snapshot,
         )
 
         return MarketAnalysis(
             text=analysis_text,
             summary=summary_text,
             history_hint=history_hint,
-            trend_strength=trend_strength,
-            momentum_score=momentum_score,
-            support_levels=support_levels,
-            resistance_levels=resistance_levels,
-            risk_factors=risk_factors,
+            trend_strength=trend.strength,
+            momentum_score=momentum.score,
+            support_levels=list(levels.supports),
+            resistance_levels=list(levels.resistances),
+            risk_factors=list(risk.factors),
+            trend=trend,
+            momentum=momentum,
+            levels=levels,
+            risk=risk,
         )
 
     def _calculate_trend_strength(
-        self, features: pd.DataFrame, higher_features: Optional[Dict]
+        self,
+        features: pd.DataFrame,
+        higher_features: Optional[Dict[str, pd.DataFrame]],
     ) -> float:
-        """计算趋势强度（阶段 2-3 实现）."""
-        latest = features.iloc[-1]
-
-        # 简单实现：基于 EMA 快慢线距离
-        ema_fast = latest.get("ema_fast", 0)
-        ema_slow = latest.get("ema_slow", 0)
-
-        if ema_slow > 0:
-            diff_pct = abs(ema_fast - ema_slow) / ema_slow
-            # 归一化到 0-1
-            strength = min(diff_pct * 10, 1.0)
-        else:
-            strength = 0.5
-
-        return strength
+        return self._assess_trend(features, higher_features).strength
 
     def _calculate_momentum(self, features: pd.DataFrame) -> float:
-        """计算动量评分（阶段 2 实现）."""
-        latest = features.iloc[-1]
-
-        # 简单实现：基于 RSI
-        rsi = latest.get("rsi", 50)
-
-        # 归一化到 -1 到 1
-        if rsi > 70:
-            momentum = (rsi - 70) / 30  # 超买
-        elif rsi < 30:
-            momentum = (rsi - 30) / 30  # 超卖
-        else:
-            momentum = (rsi - 50) / 20  # 中性
-
-        return max(-1.0, min(1.0, momentum))
+        return self._assess_momentum(features).score
 
     def _find_support_resistance(
         self, features: pd.DataFrame
     ) -> tuple[List[float], List[float]]:
-        """识别支撑/阻力位（阶段 3 实现）."""
+        levels = self._assess_levels(features)
+        return levels.supports, levels.resistances
+
+    def _identify_risks(
+        self,
+        features: pd.DataFrame,
+        higher_features: Optional[Dict[str, pd.DataFrame]],
+        risk_note: Optional[str],
+        account_snapshot: Optional[Dict[str, float]],
+    ) -> List[str]:
+        levels = self._assess_levels(features)
+        return self._assess_risk(
+            features=features,
+            higher_features=higher_features,
+            risk_note=risk_note,
+            account_snapshot=account_snapshot,
+            levels=levels,
+        ).factors
+
+    def _assess_trend(
+        self,
+        features: pd.DataFrame,
+        higher_features: Optional[Dict[str, pd.DataFrame]],
+    ) -> TrendAssessment:
+        latest = features.iloc[-1]
+        ema_fast = float(latest.get("ema_fast", 0.0) or 0.0)
+        ema_slow = float(latest.get("ema_slow", 0.0) or 0.0)
+        adx = float(latest.get("adx", 0.0) or 0.0)
+        adx_pos = float(latest.get("adx_pos", 0.0) or 0.0)
+        adx_neg = float(latest.get("adx_neg", 0.0) or 0.0)
+
+        gap_pct = (ema_fast - ema_slow) / ema_slow if abs(ema_slow) > 1e-9 else 0.0
+        gap_sign = 1.0 if gap_pct > 0 else -1.0 if gap_pct < 0 else 0.0
+        di_bias = 1.0 if adx_pos > adx_neg else -1.0 if adx_neg > adx_pos else 0.0
+        alignment = self._higher_timeframe_alignment(higher_features)
+
+        direction_score = gap_sign + di_bias * 0.6 + alignment * 0.5
+        if direction_score > 0.35:
+            direction = "bullish"
+        elif direction_score < -0.35:
+            direction = "bearish"
+        else:
+            direction = "range"
+
+        strength = min(abs(gap_pct) * 18.0, 0.55)
+        strength += min(max(adx - 15.0, 0.0) / 50.0, 0.35)
+        strength += min(abs(alignment) * 0.15, 0.1)
+        strength = max(0.0, min(1.0, strength))
+
+        label = self._trend_label(direction, strength, adx, alignment)
+        return TrendAssessment(
+            direction=direction,
+            strength=strength,
+            label=label,
+            ema_gap_pct=gap_pct,
+            adx=adx,
+            higher_timeframe_alignment=alignment,
+        )
+
+    def _assess_momentum(self, features: pd.DataFrame) -> MomentumAssessment:
+        latest = features.iloc[-1]
+        rsi = float(latest.get("rsi", 50.0) or 50.0)
+        macd = float(latest.get("macd", 0.0) or 0.0)
+        macd_signal = float(latest.get("macd_signal", 0.0) or 0.0)
+        stoch_k = float(latest.get("stoch_k", 50.0) or 50.0)
+        stoch_d = float(latest.get("stoch_d", 50.0) or 50.0)
+        williams_r = float(latest.get("williams_r", -50.0) or -50.0)
+
+        rsi_component = max(-1.0, min(1.0, (rsi - 50.0) / 25.0)) * 0.35
+        macd_component = 0.25 if macd > macd_signal else -0.25 if macd < macd_signal else 0.0
+        stoch_component = 0.2 if stoch_k > max(stoch_d, 60.0) else -0.2 if stoch_k < min(stoch_d, 40.0) else 0.0
+        williams_component = 0.2 if williams_r > -35.0 else -0.2 if williams_r < -65.0 else 0.0
+
+        score = rsi_component + macd_component + stoch_component + williams_component
+        score = max(-1.0, min(1.0, score))
+
+        if rsi >= 75.0 and stoch_k >= 80.0 and williams_r >= -20.0:
+            label = "overbought"
+        elif rsi <= 25.0 and stoch_k <= 20.0 and williams_r <= -80.0:
+            label = "oversold"
+        elif score >= 0.2:
+            label = "bullish"
+        elif score <= -0.2:
+            label = "bearish"
+        else:
+            label = "neutral"
+
+        return MomentumAssessment(
+            score=score,
+            label=label,
+            rsi=rsi,
+            macd_bias="bullish" if macd > macd_signal else "bearish" if macd < macd_signal else "neutral",
+            stoch_bias="bullish" if stoch_k > stoch_d else "bearish" if stoch_k < stoch_d else "neutral",
+            williams_bias="overbought" if williams_r >= -20.0 else "oversold" if williams_r <= -80.0 else "neutral",
+        )
+
+    def _assess_levels(self, features: pd.DataFrame) -> LevelAssessment:
+        supports, resistances = self._extract_support_resistance(features)
+        if features is None or features.empty:
+            return LevelAssessment(supports=supports, resistances=resistances)
+
+        recent = features.tail(min(len(features), 50))
+        high = float(recent["high"].max() or 0.0)
+        low = float(recent["low"].min() or 0.0)
+        close = float(recent.iloc[-1].get("close", 0.0) or 0.0)
+        range_position = None
+        if high > low:
+            range_position = max(0.0, min(1.0, (close - low) / (high - low)))
+        nearest_support = max(supports) if supports else None
+        nearest_resistance = min(resistances) if resistances else None
+        return LevelAssessment(
+            supports=supports,
+            resistances=resistances,
+            nearest_support=nearest_support,
+            nearest_resistance=nearest_resistance,
+            range_position=range_position,
+        )
+
+    def _extract_support_resistance(
+        self, features: pd.DataFrame
+    ) -> tuple[List[float], List[float]]:
         if features is None or len(features) < 12:
             return [], []
         lows = features["low"].astype(float).tolist()
@@ -171,7 +321,13 @@ class MarketAnalyzer:
             if high_window and center_high >= max(high_window):
                 local_highs.append(center_high)
 
-        tolerance = max(0.0015, min(0.02, float(features["close"].pct_change().abs().tail(40).mean() or 0.003) * 1.8))
+        tolerance = max(
+            0.0015,
+            min(
+                0.02,
+                float(features["close"].pct_change().abs().tail(40).mean() or 0.003) * 1.8,
+            ),
+        )
         supports = self._cluster_levels(
             [value for value in local_lows if value < close],
             current_price=close,
@@ -187,6 +343,109 @@ class MarketAnalyzer:
             reverse=False,
         )
         return supports, resistances
+
+    def _assess_risk(
+        self,
+        *,
+        features: pd.DataFrame,
+        higher_features: Optional[Dict[str, pd.DataFrame]],
+        risk_note: Optional[str],
+        account_snapshot: Optional[Dict[str, float]],
+        levels: LevelAssessment,
+    ) -> RiskAssessment:
+        del higher_features
+
+        latest = features.iloc[-1]
+        close = float(latest.get("close", 0.0) or 0.0)
+        atr = float(latest.get("atr", 0.0) or 0.0)
+        volatility_ratio = (atr / close) if close > 0 else 0.0
+
+        factors: List[str] = []
+        if risk_note:
+            factors.append(risk_note)
+
+        regime = "normal"
+        if volatility_ratio >= 0.05:
+            factors.append("高波动率")
+            regime = "hot"
+        elif 0 < volatility_ratio <= 0.01:
+            regime = "calm"
+
+        if levels.nearest_support is not None and close > 0:
+            support_distance = abs(close - levels.nearest_support) / close
+            if support_distance <= 0.008:
+                factors.append("接近支撑位")
+
+        if levels.nearest_resistance is not None and close > 0:
+            resistance_distance = abs(levels.nearest_resistance - close) / close
+            if resistance_distance <= 0.008:
+                factors.append("接近阻力位")
+
+        account_pressure = 0.0
+        if account_snapshot:
+            available_pct = float(account_snapshot.get("available_pct", 1.0) or 0.0)
+            account_pressure = max(0.0, min(1.0, 1.0 - available_pct))
+            if available_pct < 0.3:
+                factors.append("可用资金不足")
+
+        return RiskAssessment(
+            factors=self._dedupe_strings(factors),
+            volatility_ratio=volatility_ratio,
+            regime=regime,
+            account_pressure=account_pressure,
+        )
+
+    def _compose_analysis_text(
+        self,
+        *,
+        inst_id: str,
+        timeframe: str,
+        latest: pd.Series,
+        trend: TrendAssessment,
+        momentum: MomentumAssessment,
+        levels: LevelAssessment,
+        risk: RiskAssessment,
+        account_snapshot: Optional[Dict[str, float]],
+    ) -> str:
+        close = float(latest.get("close", 0.0) or 0.0)
+        cci = float(latest.get("cci", 0.0) or 0.0)
+        macd = float(latest.get("macd", 0.0) or 0.0)
+        macd_signal = float(latest.get("macd_signal", 0.0) or 0.0)
+        ema_fast = float(latest.get("ema_fast", 0.0) or 0.0)
+        ema_slow = float(latest.get("ema_slow", 0.0) or 0.0)
+        adx = float(latest.get("adx", 0.0) or 0.0)
+        stoch_k = float(latest.get("stoch_k", 50.0) or 50.0)
+        stoch_d = float(latest.get("stoch_d", 50.0) or 50.0)
+
+        sections = [
+            f"**交易对**：{inst_id} @ {timeframe}",
+            f"**当前价格**：{close:.4f}",
+            f"**趋势**：{trend.label}（ADX={adx:.1f}，趋势强度={trend.strength:.2f}）",
+            f"**EMA**：快线 {ema_fast:.4f} / 慢线 {ema_slow:.4f}（gap {trend.ema_gap_pct:+.2%}）",
+            f"**动量**：{momentum.label}（score={momentum.score:+.2f}，RSI={momentum.rsi:.1f}）",
+            f"**MACD**：{macd:.4f} / 信号 {macd_signal:.4f}（{momentum.macd_bias}）",
+            f"**CCI**：{cci:.1f}",
+            f"**KDJ**：K={stoch_k:.1f} / D={stoch_d:.1f}",
+        ]
+
+        if levels.supports:
+            sections.append("**支撑位**：" + " / ".join(f"{item:.4f}" for item in levels.supports))
+        if levels.resistances:
+            sections.append("**阻力位**：" + " / ".join(f"{item:.4f}" for item in levels.resistances))
+        if levels.range_position is not None:
+            sections.append(f"**区间位置**：{levels.range_position:.0%}")
+
+        if account_snapshot:
+            equity = float(account_snapshot.get("equity", 0.0) or 0.0)
+            available = float(account_snapshot.get("available", 0.0) or 0.0)
+            sections.append(f"**账户权益**：{equity:.2f} USDT")
+            sections.append(f"**可用资金**：{available:.2f} USDT")
+
+        if risk.factors:
+            sections.append("**风险**：" + "; ".join(risk.factors))
+
+        sections.append("**建议**：" + self._build_advice(trend, momentum, risk))
+        return "\n".join(sections)
 
     @staticmethod
     def _cluster_levels(
@@ -217,201 +476,101 @@ class MarketAnalyzer:
         merged = sorted(merged, reverse=reverse)
         return [round(item, 6) for item in merged[: max(1, top_n)]]
 
-    def _identify_risks(
-        self,
-        features: pd.DataFrame,
-        higher_features: Optional[Dict],
-        risk_note: Optional[str],
-        account_snapshot: Optional[Dict[str, float]],
-    ) -> List[str]:
-        """识别风险因素."""
-        risks = []
+    @staticmethod
+    def _higher_timeframe_alignment(
+        higher_features: Optional[Dict[str, pd.DataFrame]],
+    ) -> float:
+        if not higher_features:
+            return 0.0
+        votes: List[float] = []
+        for df in higher_features.values():
+            if df is None or df.empty:
+                continue
+            latest = df.iloc[-1]
+            ema_fast = float(latest.get("ema_fast", 0.0) or 0.0)
+            ema_slow = float(latest.get("ema_slow", 0.0) or 0.0)
+            slope = 0.0
+            if len(df) >= 5:
+                slope = float(df["ema_fast"].iloc[-1] - df["ema_fast"].iloc[-5])
+            if ema_fast > ema_slow and slope >= 0:
+                votes.append(1.0)
+            elif ema_fast < ema_slow and slope <= 0:
+                votes.append(-1.0)
+            else:
+                votes.append(0.0)
+        if not votes:
+            return 0.0
+        return sum(votes) / len(votes)
 
-        if risk_note:
-            risks.append(risk_note)
-
-        # 检查波动率
-        latest = features.iloc[-1]
-        atr = latest.get("atr", 0)
-        close = latest.get("close", 0)
-
-        if close > 0 and atr / close > 0.05:
-            risks.append("高波动率")
-
-        # 检查账户风险
-        if account_snapshot:
-            available_pct = account_snapshot.get("available_pct", 1.0)
-            if available_pct < 0.3:
-                risks.append("可用资金不足")
-
-        return risks
-
-    def _compose_analysis_text(
-        self,
-        inst_id: str,
-        timeframe: str,
-        features: pd.DataFrame,
-        higher_features: Optional[Dict],
-        trend_strength: float,
-        momentum_score: float,
-        support: List[float],
-        resistance: List[float],
-        risks: List[str],
-        account_snapshot: Optional[Dict[str, float]],
-        perf_stats: Optional[Dict[str, Any]],
-        daily_stats: Optional[Dict[str, Any]],
+    @staticmethod
+    def _trend_label(
+        direction: str,
+        strength: float,
+        adx: float,
+        alignment: float,
     ) -> str:
-        """生成结构化分析文本."""
-        latest = features.iloc[-1]
-        sections = []
+        suffix = ""
+        if alignment >= 0.35:
+            suffix = "，多周期同向"
+        elif alignment <= -0.35:
+            suffix = "，高周期偏空"
+        elif abs(alignment) >= 0.1:
+            suffix = "，高周期分歧"
 
-        # 基本信息
-        close = latest.get("close", 0)
-        sections.append(f"**交易对**：{inst_id} @ {timeframe}")
-        sections.append(f"**当前价格**：{close:.4f}")
+        if direction == "bullish":
+            if strength >= 0.7:
+                return f"强势上涨{suffix}"
+            if strength >= 0.45:
+                return f"偏多上涨{suffix}"
+            return f"弱势偏多{suffix}"
+        if direction == "bearish":
+            if strength >= 0.7:
+                return f"强势下跌{suffix}"
+            if strength >= 0.45:
+                return f"偏空下跌{suffix}"
+            return f"弱势偏空{suffix}"
+        if adx < 15:
+            return "震荡无趋势"
+        return "震荡整理"
 
-        # 趋势分析（增强）
-        adx = latest.get("adx", 0)
-        adx_pos = latest.get("adx_pos", 0)
-        adx_neg = latest.get("adx_neg", 0)
+    @staticmethod
+    def _build_advice(
+        trend: TrendAssessment,
+        momentum: MomentumAssessment,
+        risk: RiskAssessment,
+    ) -> str:
+        if "高波动率" in risk.factors:
+            return "波动偏高，优先等待更好的入场位置。"
+        if trend.direction == "bullish" and momentum.label == "overbought":
+            return "上涨趋势仍在，但短线偏热，谨防回调。"
+        if trend.direction == "bearish" and momentum.label == "oversold":
+            return "下跌趋势仍在，但短线偏冷，警惕技术性反抽。"
+        if trend.direction == "bullish" and momentum.score > 0.15:
+            return "趋势与动量同向，优先顺势观察做多机会。"
+        if trend.direction == "bearish" and momentum.score < -0.15:
+            return "趋势与动量同向，优先顺势观察做空机会。"
+        if trend.direction == "range":
+            return "震荡行情，等待方向确认后再行动。"
+        return "信号未完全共振，保持观察。"
 
-        if adx > 25:
-            if adx_pos > adx_neg:
-                trend_desc = f"强势上涨（ADX={adx:.1f}, +DI={adx_pos:.1f} > -DI={adx_neg:.1f}）"
-            else:
-                trend_desc = f"强势下跌（ADX={adx:.1f}, -DI={adx_neg:.1f} > +DI={adx_pos:.1f}）"
-        elif adx > 15:
-            trend_desc = f"中等趋势（ADX={adx:.1f}）"
-        else:
-            trend_desc = f"震荡无趋势（ADX={adx:.1f}）"
-        sections.append(f"**趋势**：{trend_desc}")
-
-        # 动量分析（增强）
-        rsi = latest.get("rsi", 50)
-        stoch_k = latest.get("stoch_k", 50)
-        stoch_d = latest.get("stoch_d", 50)
-        kdj_j = latest.get("kdj_j", 50)
-        williams_r = latest.get("williams_r", -50)
-
-        momentum_signals = []
-        if rsi > 70:
-            momentum_signals.append("RSI超买")
-        elif rsi < 30:
-            momentum_signals.append("RSI超卖")
-
-        if stoch_k > 80:
-            momentum_signals.append("KDJ超买")
-        elif stoch_k < 20:
-            momentum_signals.append("KDJ超卖")
-
-        if williams_r > -20:
-            momentum_signals.append("W%R超买")
-        elif williams_r < -80:
-            momentum_signals.append("W%R超卖")
-
-        momentum_desc = "、".join(momentum_signals) if momentum_signals else "中性"
-        sections.append(f"**动量**：{momentum_desc}")
-        sections.append(f"  - RSI: {rsi:.1f}, Stoch K/D: {stoch_k:.1f}/{stoch_d:.1f}, KDJ J: {kdj_j:.1f}")
-        sections.append(f"  - Williams %R: {williams_r:.1f}")
-
-        # CCI 分析
-        cci = latest.get("cci", 0)
-        if cci > 100:
-            cci_desc = "超买区域"
-        elif cci < -100:
-            cci_desc = "超卖区域"
-        else:
-            cci_desc = "正常区间"
-        sections.append(f"**CCI**：{cci:.1f}（{cci_desc}）")
-
-        # MACD 分析
-        macd = latest.get("macd", 0)
-        macd_signal = latest.get("macd_signal", 0)
-        macd_hist = latest.get("macd_hist", 0)
-
-        if macd > macd_signal:
-            macd_desc = "金叉（看涨）"
-        else:
-            macd_desc = "死叉（看跌）"
-        sections.append(f"**MACD**：{macd:.4f} / 信号 {macd_signal:.4f}（{macd_desc}）")
-
-        # EMA 分析
-        ema_fast = latest.get("ema_fast", 0)
-        ema_slow = latest.get("ema_slow", 0)
-        if ema_fast > ema_slow:
-            ema_desc = "快线在慢线上方（看涨）"
-        else:
-            ema_desc = "快线在慢线下方（看跌）"
-        sections.append(f"**EMA**：{ema_desc}")
-
-        # Ichimoku 分析
-        ichimoku_conv = latest.get("ichimoku_conv", 0)
-        ichimoku_base = latest.get("ichimoku_base", 0)
-        ichimoku_a = latest.get("ichimoku_a", 0)
-        ichimoku_b = latest.get("ichimoku_b", 0)
-
-        if close > 0 and ichimoku_a > 0 and ichimoku_b > 0:
-            cloud_top = max(ichimoku_a, ichimoku_b)
-            cloud_bottom = min(ichimoku_a, ichimoku_b)
-
-            if close > cloud_top:
-                ichimoku_desc = "价格在云上方（强势看涨）"
-            elif close < cloud_bottom:
-                ichimoku_desc = "价格在云下方（强势看跌）"
-            else:
-                ichimoku_desc = "价格在云中（震荡）"
-
-            if ichimoku_conv > ichimoku_base:
-                ichimoku_desc += "，转换线>基准线"
-            else:
-                ichimoku_desc += "，转换线<基准线"
-
-            sections.append(f"**Ichimoku**：{ichimoku_desc}")
-
-        # 布林带
-        bb_high = latest.get("bb_high", 0)
-        bb_low = latest.get("bb_low", 0)
-        if close > 0 and bb_high > 0 and bb_low > 0:
-            if close > bb_high:
-                bb_desc = "价格突破上轨（超买）"
-            elif close < bb_low:
-                bb_desc = "价格突破下轨（超卖）"
-            else:
-                bb_position = (close - bb_low) / (bb_high - bb_low) if (bb_high - bb_low) > 0 else 0.5
-                bb_desc = f"价格在布林带内（位置 {bb_position:.0%}）"
-            sections.append(f"**布林带**：{bb_desc}")
-
-        # 成交量
-        volume = latest.get("volume", 0)
-        mfi = latest.get("mfi", 50)
-        sections.append(f"**成交量**：{volume:.2f}，MFI: {mfi:.1f}")
-        if support:
-            sections.append("**支撑位**：" + " / ".join(f"{item:.4f}" for item in support))
-        if resistance:
-            sections.append("**阻力位**：" + " / ".join(f"{item:.4f}" for item in resistance))
-
-        # 账户信息
-        if account_snapshot:
-            equity = account_snapshot.get("equity", 0)
-            available = account_snapshot.get("available", 0)
-            sections.append(f"**账户权益**：{equity:.2f} USDT")
-            sections.append(f"**可用资金**：{available:.2f} USDT")
-
-        # 风险因素
-        if risks:
-            sections.append(f"**风险**：{'; '.join(risks)}")
-
-        # 综合建议
-        if momentum_score < -0.5 and trend_strength > 0.5:
-            sections.append("**建议**：超卖区域且趋势明确，可能存在反弹机会")
-        elif momentum_score > 0.5 and trend_strength > 0.5:
-            sections.append("**建议**：超买区域且趋势明确，注意回调风险")
-        elif adx < 15:
-            sections.append("**建议**：震荡行情，等待明确趋势信号")
-        else:
-            sections.append("**建议**：观察市场，等待更明确的信号")
-
-        return "\n".join(sections)
+    @staticmethod
+    def _dedupe_strings(items: List[str]) -> List[str]:
+        result: List[str] = []
+        seen = set()
+        for item in items:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
 
 
-__all__ = ["MarketAnalyzer", "MarketAnalysis"]
+__all__ = [
+    "MarketAnalyzer",
+    "MarketAnalysis",
+    "TrendAssessment",
+    "MomentumAssessment",
+    "LevelAssessment",
+    "RiskAssessment",
+]

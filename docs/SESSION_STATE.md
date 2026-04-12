@@ -3,14 +3,19 @@
 > 用途：记录“当前做到哪一步”，供新线程快速恢复。
 
 ## 元信息
-- 最后更新时间：2026-04-11
+- 最后更新时间：2026-04-12
 - 当前主线：按 `docs/NODES.md` 推进
-- 当前批次：cli-only 观测准备 / 参数微调
-- 当前节点：已删除 `main.py` 旧入口，当前回到 cli-only 运行与观测准备
+- 当前批次：四阶段策略/分析质量提升已完成，watchlist 已收口为 manual-only
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；当前回到可交付状态下的观测与参数微调
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
 |---|---|---|
+| N6 follow-up | 已完成 | `MarketAnalyzer` 改为 structured-assessment first，新增 trend/momentum/levels/risk 结构，文本改为渲染层 |
+| N7 follow-up | 已完成 | `intel` 对所有 provider 引入统一 relevance scoring，headline/snapshot 扩展 relevance metadata，并按 relevance 加权聚合 |
+| N8 follow-up | 已完成 | `LLMBrain` prompt 增加 structured market/intel context，不再只依赖长文本与原始 dict dump |
+| N9 follow-up | 已完成 | `Strategy/Fusion` 已能直接消费 `MarketAnalysis v2`，确定性分析不再只通过自由文本进入融合 |
+| N2 | 已完成 | `cli.py` 已瘦身为 facade；参数解析、命令分发、workflow/reporting/storage 已拆入 `cli_app/`，`okx -> cli.py` 仍是唯一入口 |
 | N12 | 已完成 | `TradingEngine.run_once` 已拆为 data/analysis/strategy/risk/execution 五步，并新增测试覆盖 |
 | N15 | 已完成 | 已引入 `trace_id` 并在主链路输出结构化日志字段（action/blocked/error_code） |
 | N11 | 已完成 | `ExecutionPlan` 增加 `cl_ord_id`，下单链路默认生成并透传，执行重试可复用 |
@@ -19,11 +24,149 @@
 | N8 | 已完成 | LLM 融合新增影响上限：禁反转、禁 HOLD 提升（默认）、限制置信度增幅 |
 | N7 | 已完成 | 情报层支持源白/黑名单、窗口去重、事件标签权重，并接入风险闸门（降级/阻断） |
 | N9 | 已完成 | 融合层新增插件冲突仲裁（同向增强/反向抑制/强冲突 HOLD）与 `[arb]` 解释标签 |
-| N1-N3, N5-N6, N13-N14 | 已完成 | 配置强校验+快照、heartbeat、联合筛选、特征分层、支撑阻力、per-inst 保护、多标的调参与成本模型已落地 |
+| N1, N3, N5-N6, N13-N14 | 已完成 | 配置强校验+快照、联合筛选、特征分层、支撑阻力、per-inst 保护、多标的调参与成本模型已落地 |
 
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-12
+- 节点：交付前仓库清理
+- 目标：按“当前实现可运行且可交付”为边界，删除与当前主线无关的旧代码、资料文件、本地残留与过时说明，并准备推送远端。
+- 结果：完成。已删除 `okx-doc.html`、旧 `.worktrees/cli-entry-consolidation` 本地 worktree、项目级缓存/日志/运行产物；README 已改为真实入口 `./okx` / `python cli.py`；auto watchlist 旧路径和配置已清理；全量测试保持通过。
+- 变更文件：
+  - `.gitignore`
+  - `README.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `okx-doc.html`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q` -> `158 passed`
+  - `./okx config-check` -> `pass`
+  - `git diff --check` -> `clean`
+  - `git worktree list --porcelain` -> 仅保留当前主 worktree
+
+- 时间：2026-04-12
+- 节点：N3 follow-up - Watchlist manual-only 收口
+- 目标：用户明确要求清理自动 watchlist；交付后观测期也需要稳定标的集合，因此把 `manual/auto/mixed` 收口为纯手动 `watchlist.json`。
+- 结果：完成。`WatchlistManager` 现只读取 `watchlist.json`；`WATCHLIST_MODE` 与所有 `AUTO_WATCHLIST_*` 配置项已删除；`core/data/auto_watchlist.py` 与对应测试已移除；配置摘要、README 和交接文档同步为 manual-only 语义。
+- 变更文件：
+  - `core/data/watchlist_loader.py`
+  - `core/data/__init__.py`
+  - `config/settings.py`
+  - `cli_app/config_reporting.py`
+  - `tests/test_watchlist_loader.py`
+  - `tests/test_settings_validation.py`
+  - `tests/test_cli_config_reporting.py`
+  - `tests/test_cli_config_workflows.py`
+  - `.env`
+  - `README.md`
+  - `docs/NODES.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/DECISIONS.md`
+  - `docs/NEXT_STEP.md`
+- 删除文件：
+  - `core/data/auto_watchlist.py`
+  - `tests/test_auto_watchlist_filters.py`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_watchlist_loader.py tests/test_settings_validation.py tests/test_cli_config_reporting.py tests/test_cli_config_workflows.py` -> `13 passed`
+  - `.venv/bin/python -m pytest -q` -> `158 passed`
+
+- 时间：2026-04-12
+- 节点：N7-N9 / N8 follow-up - 四阶段策略分析质量提升收尾
+- 目标：在已完成 `market.py` 结构化重构的基础上，继续完成 `intel` 相关性质量、`strategy/fusion` 对 structured market analysis 的消费、以及 `llm_brain` 对 structured market/intel context 的接入，直到分析层真正贯通到决策层。
+- 结果：完成。`NewsIntelCollector` 现对所有 provider 统一做 relevance scoring/filtering，并把 sentiment/event 聚合改为按 relevance 加权；`Strategy.generate_signal(...)` 新增 `market_analysis` 输入并优先消费 `MarketAnalysis v2` 的 structured view；`TradingEngine` 将 `analysis_result` 传给 strategy，将 compact `structured_market_analysis` / `structured_market_intel` 传给 `LLMBrain`；全量测试进一步提升到 `159 passed`。
+- 变更文件：
+  - `core/analysis/intel.py`
+  - `core/strategy/fusion.py`
+  - `core/strategy/core.py`
+  - `core/analysis/llm_brain.py`
+  - `core/engine/trading.py`
+  - `tests/test_intel.py`
+  - `tests/test_strategy_core.py`
+  - `tests/test_trading_pipeline.py`
+  - `tests/test_llm_brain.py`
+  - `docs/superpowers/specs/2026-04-12-intel-relevance-scoring-design.md`
+  - `docs/superpowers/plans/2026-04-12-intel-relevance-scoring.md`
+  - `docs/superpowers/specs/2026-04-12-strategy-market-analysis-integration-design.md`
+  - `docs/superpowers/plans/2026-04-12-strategy-market-analysis-integration.md`
+  - `docs/superpowers/specs/2026-04-12-llm-structured-context-design.md`
+  - `docs/superpowers/plans/2026-04-12-llm-structured-context.md`
+  - `docs/NODES.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/DECISIONS.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_intel.py` -> `11 passed`
+  - `.venv/bin/python -m pytest -q tests/test_strategy_core.py tests/test_trading_pipeline.py` -> `11 passed`
+  - `.venv/bin/python -m pytest -q tests/test_llm_brain.py` -> `5 passed`
+  - `.venv/bin/python -m pytest -q` -> `159 passed`
+- 产物/日志：
+  - `MarketIntelSnapshot.analysis_version = "v2"`
+  - `NewsHeadline` 新增 `relevance_score`、`matched_aliases`
+  - `Strategy.generate_signal(..., market_analysis=...)`
+  - `LLMBrain.analyze(..., structured_market_analysis=..., structured_market_intel=...)`
+
+- 时间：2026-04-12
+- 节点：N6 follow-up / 第 1 阶段 - Deterministic Market Analysis
+- 目标：把 `market.py` 从“指标判断 + 文本硬编码”改成结构化 assessment 内核，为后续 `intel/fusion/llm` 提供稳定输入，同时保持旧 `MarketAnalysis` 字段兼容。
+- 结果：完成。`MarketAnalyzer` 现先生成 `TrendAssessment`、`MomentumAssessment`、`LevelAssessment`、`RiskAssessment`，再渲染文本；`MarketAnalysis` 新增 `trend/momentum/levels/risk/analysis_version=v2`，并继续回填 `trend_strength/momentum_score/support_levels/resistance_levels/risk_factors`；新增 bearish contract 测试与兼容性测试后，全量测试从 `150` 提升到 `153` 并保持通过。
+- 变更文件：
+  - `core/analysis/market.py`
+  - `tests/test_market_analyzer.py`
+  - `docs/superpowers/specs/2026-04-12-market-analysis-structured-contract-design.md`
+  - `docs/superpowers/plans/2026-04-12-market-analysis-structured-contract.md`
+  - `docs/NODES.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/DECISIONS.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_market_analyzer.py` -> `14 passed`
+  - `.venv/bin/python -m pytest -q` -> `153 passed`
+- 产物/日志：
+  - `MarketAnalysis.analysis_version = "v2"`
+  - 新增结构化字段：`trend`、`momentum`、`levels`、`risk`
+  - 旧字段继续兼容：`trend_strength`、`momentum_score`、`support_levels`、`resistance_levels`、`risk_factors`
+
+- 时间：2026-04-11
+- 节点：N2 / N14 follow-up - CLI command package + backtest storage
+- 目标：在不改变 `./okx` / `python cli.py` 单入口契约的前提下，继续把 CLI 内部从单文件职责拆成命令包，并把回测结果持久化从通用 helper 中独立出去。
+- 结果：完成。`cli.py` 现仅保留 `build_parser/main` facade；解析注册拆到 `cli_app/parser.py`、`cli_app/registry.py` 与 `*_parser.py`；命令执行拆到 `cli_app/commands/*.py` 与 `*_workflows.py`；状态展示与回测输出拆到 `runtime_reporting.py`、`backtest_reporting.py`；回测结果文件读写单独收口到 `cli_app/backtest_storage.py`，`backtest_helpers.py` 仅保留计算与摘要打印相关逻辑。新增长度较小的模块边界后，CLI 保持单入口但不再依赖过载单文件。
+- 变更文件：
+  - `cli.py`
+  - `cli_app/parser.py`
+  - `cli_app/registry.py`
+  - `cli_app/runtime_parser.py`
+  - `cli_app/config_parser.py`
+  - `cli_app/strategies_parser.py`
+  - `cli_app/backtest_parser.py`
+  - `cli_app/commands/runtime.py`
+  - `cli_app/commands/config.py`
+  - `cli_app/commands/strategies.py`
+  - `cli_app/commands/backtest.py`
+  - `cli_app/runtime_workflows.py`
+  - `cli_app/strategy_workflows.py`
+  - `cli_app/backtest_workflows.py`
+  - `cli_app/runtime_reporting.py`
+  - `cli_app/backtest_reporting.py`
+  - `cli_app/backtest_storage.py`
+  - `tests/test_cli_entrypoints.py`
+  - `tests/test_cli_parser.py`
+  - `tests/test_cli_backtest_workflows.py`
+  - `tests/test_cli_backtest_storage.py`
+  - `docs/NODES.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/DECISIONS.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q` -> `150 passed`
+  - `.venv/bin/python cli.py --help` -> `exit 0`
+  - `./okx --help` -> `exit 0`
+  - `git diff --check -- cli.py cli_app tests docs` -> `clean`
+- 产物/日志：
+  - `cli.py` 保持 20 行级别薄入口
+  - 新增 `cli_app/backtest_storage.py`
+  - `./okx ...` / `python cli.py ...` 用户契约保持不变
+
 - 时间：2026-04-10
 - 节点：N2 follow-up / CLI 单入口
 - 目标：删除重复入口，去掉启动界面与确认交互，把 Python 侧运行入口收口到 `cli.py`

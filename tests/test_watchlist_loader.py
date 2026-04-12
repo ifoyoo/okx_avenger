@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from core.data.watchlist_loader import normalize_entry
+from pathlib import Path
+from types import SimpleNamespace
+
+from core.data.watchlist_loader import WatchlistManager, normalize_entry
 
 
 def test_normalize_entry_preserves_news_overrides() -> None:
@@ -29,3 +32,22 @@ def test_normalize_entry_supports_string_shorthand_and_defaults() -> None:
     assert entry["inst_id"] == "BTC-USDT-SWAP"
     assert entry["timeframe"] == "5m"
     assert entry["higher_timeframes"] == ("1H",)
+
+
+def test_watchlist_manager_is_manual_only_and_does_not_require_mode_settings(tmp_path: Path) -> None:
+    watchlist_path = tmp_path / "watchlist.json"
+    watchlist_path.write_text('["BTC-USDT-SWAP"]', encoding="utf-8")
+
+    manager = WatchlistManager(
+        okx_client=object(),
+        settings=SimpleNamespace(runtime=SimpleNamespace()),
+    )
+    manager._watchlist_path = watchlist_path
+
+    assert manager.get_watchlist() == [
+        {
+            "inst_id": "BTC-USDT-SWAP",
+            "timeframe": "5m",
+            "higher_timeframes": ("1H",),
+        }
+    ]

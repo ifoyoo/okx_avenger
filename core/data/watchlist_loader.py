@@ -1,4 +1,4 @@
-"""Watchlist loading utilities (manual + automatic)."""
+"""Manual watchlist loading utilities."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from config.settings import AppSettings
-from .auto_watchlist import AutoWatchlistBuilder
 from core.client import OKXClient
 
 DEFAULT_CONFIG_PATH = Path("watchlist.json")
@@ -69,43 +68,21 @@ def normalize_entry(entry: Any) -> Dict[str, Any]:
 
 
 class WatchlistManager:
-    """Provide runtime watchlist based on mode (manual / auto / mixed)."""
+    """Provide runtime watchlist from the manual watchlist file only."""
 
     def __init__(self, okx_client: OKXClient, settings: AppSettings) -> None:
         self.okx = okx_client
         self.settings = settings
-        self.mode = (settings.runtime.watchlist_mode or "manual").strip().lower() or "manual"
-        self.auto_builder = AutoWatchlistBuilder(
-            okx_client,
-            settings.strategy,
-            settings.runtime,
-        )
         self._watchlist_path = DEFAULT_CONFIG_PATH
         self._manual_cache: List[Dict[str, Any]] = []
         self._manual_mtime: float = 0.0
 
     def get_watchlist(self, account_snapshot: Optional[Dict[str, float]] = None) -> List[Dict[str, Any]]:
-        manual_entries: List[Dict[str, Any]] = []
         try:
-            if self.mode in ("manual", "mixed"):
-                manual_entries = self._load_manual_entries()
+            return self._load_manual_entries()
         except Exception as exc:
             logger.warning(f"加载手动 watchlist 失败: {exc}")
-        if self.mode == "manual":
-            return manual_entries
-        auto_entries = self.auto_builder.get_entries(account_snapshot)
-        if self.mode == "auto":
-            return auto_entries
-        # default mixed mode: manual entries优先，自动列表补足其它合约
-        combined = list(manual_entries)
-        existing = {entry["inst_id"].upper() for entry in manual_entries}
-        for entry in auto_entries:
-            inst_key = entry["inst_id"].upper()
-            if inst_key in existing:
-                continue
-            combined.append(entry)
-            existing.add(inst_key)
-        return combined
+            return []
 
     def _load_manual_entries(self) -> List[Dict[str, Any]]:
         path = self._watchlist_path

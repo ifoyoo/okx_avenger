@@ -117,6 +117,55 @@ def _score_decision_quality(parsed: Dict[str, Any], raw_text: str) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _compact_market_analysis_payload(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    trend = getattr(value, "trend", None)
+    momentum = getattr(value, "momentum", None)
+    levels = getattr(value, "levels", None)
+    risk = getattr(value, "risk", None)
+    return {
+        "trend_direction": getattr(trend, "direction", ""),
+        "trend_strength": round(float(getattr(trend, "strength", 0.0) or 0.0), 3),
+        "trend_label": getattr(trend, "label", ""),
+        "momentum_score": round(float(getattr(momentum, "score", 0.0) or 0.0), 3),
+        "momentum_label": getattr(momentum, "label", ""),
+        "supports": list(getattr(levels, "supports", []) or [])[:3],
+        "resistances": list(getattr(levels, "resistances", []) or [])[:3],
+        "risk_factors": list(getattr(risk, "factors", []) or [])[:5],
+    }
+
+
+def _compact_market_intel_payload(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    payload = dict(value) if isinstance(value, dict) else {}
+    headlines = payload.get("headlines") or []
+    compact_headlines = []
+    for item in headlines[:3]:
+        if not isinstance(item, dict):
+            continue
+        compact_headlines.append(
+            {
+                "title": str(item.get("title") or ""),
+                "provider": str(item.get("provider") or ""),
+                "relevance_score": item.get("relevance_score"),
+            }
+        )
+    return {
+        "sentiment_score": payload.get("sentiment_score"),
+        "event_tags": payload.get("event_tags") or {},
+        "event_risk_score": payload.get("event_risk_score"),
+        "coverage_count": payload.get("coverage_count"),
+        "avg_relevance_score": payload.get("avg_relevance_score"),
+        "providers": payload.get("providers") or [],
+        "matched_aliases": payload.get("matched_aliases") or [],
+        "top_headlines": compact_headlines,
+    }
+
+
 class LLMBrain:
     """OpenAI 兼容接口的 LLM 决策组件。"""
 
@@ -148,6 +197,8 @@ class LLMBrain:
         risk_note: Optional[str],
         account_snapshot: Optional[Dict[str, float]],
         market_intel: Optional[Dict[str, Any]] = None,
+        structured_market_analysis: Optional[Any] = None,
+        structured_market_intel: Optional[Any] = None,
     ) -> Optional[BrainDecision]:
         if not self.ready:
             return None
@@ -176,6 +227,8 @@ class LLMBrain:
             av = float(account_snapshot.get("available") or 0.0)
             pct = (av / eq) if eq > 0 else 0.0
             account_text = f"equity={eq:.2f}, available={av:.2f}, available_pct={pct:.2%}"
+        structured_market_payload = _compact_market_analysis_payload(structured_market_analysis)
+        structured_intel_payload = _compact_market_intel_payload(structured_market_intel or market_intel)
         prompt = (
             "你是加密交易风险顾问。请根据输入数据输出严格 JSON，字段为："
             "action(buy/sell/hold), confidence(0-1), reason, risk, time_horizon, invalid_conditions。"
@@ -186,7 +239,8 @@ class LLMBrain:
             f"higher: {' | '.join(higher_hint) if higher_hint else '-'}\n"
             f"risk_note={risk_note or '-'}\n"
             f"account={account_text or '-'}\n\n"
-            f"market_intel={json.dumps(market_intel or {}, ensure_ascii=False)[:1800]}\n\n"
+            f"structured_market_analysis={json.dumps(structured_market_payload, ensure_ascii=False)[:1200]}\n"
+            f"structured_market_intel={json.dumps(structured_intel_payload, ensure_ascii=False)[:1200]}\n\n"
             f"deterministic_summary:\n{deterministic_summary[:1200]}\n\n"
             f"deterministic_analysis:\n{deterministic_analysis[:1600]}\n"
         )

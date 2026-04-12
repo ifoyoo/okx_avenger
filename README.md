@@ -6,13 +6,13 @@
 
 ## 项目亮点
 
-- **端到端自动化**：`main.py` 通过 Rich 动画确认 → watchlist 并发调度 → 策略/风控 → 执行/通知，全程每 `RUN_INTERVAL_MINUTES` 分钟循环。
+- **端到端自动化**：`./okx` / `python cli.py` 统一驱动 watchlist 扫描、策略/风控、执行/通知，并按 `RUN_INTERVAL_MINUTES` 进入循环模式。
 - **多维行情输入**：`core/data/snapshot.py` 聚合 OKX REST + WebSocket 的 K 线、盘口、实时成交、资金费率、持仓量，转成可读摘要供策略使用。
 - **智能市场分析**：`core/analysis/market.py` 基于技术指标和结构进行确定性分析，提供趋势强度、动量评分、风险因素识别。
 - **客观指标融合**：`core/strategy/core.py` 将 RSI/EMA/MACD/Bollinger/ATR 等客观指标、市场分析、波动/流动性过滤及 PositionSizer 组合成可执行信号。
 - **三层风控 + 精细执行**：`core/engine/risk.py`（账户/品种/信号）、`core/engine/execution.py`（合约规格、止盈止损附带、滑点控制）、`core/data/performance.py`（近期盈亏快照）闭环。
-- **智能 watchlist**：`core/data/watchlist_loader.py` 支持手动/自动/混合；`core/data/auto_watchlist.py` 结合 24h 成交额、账户可用资金、杠杆与最小张数动态筛币。
-- **可观测性完备**：Rich 控制台、Loguru 滚动日志、决策记录、`data/perf_cache.json` 绩效缓存、Telegram 冷却通知、`data/auto_watchlist.json` 缓存全可追溯。
+- **手动 watchlist**：运行标的完全由 `watchlist.json` 管理；字符串条目默认使用 `5m + 1H`，也支持按标的覆盖周期、仓位和情报别名。
+- **可观测性完备**：Rich 控制台、Loguru 滚动日志、决策记录、`data/perf_cache.json` 绩效缓存、Telegram 冷却通知全可追溯。
 
 ---
 
@@ -21,7 +21,7 @@
 ```text
 ┌────────────┐   ┌──────────────────────────────────────────────┐
 │watchlist   │   │MarketDataStream + OKX REST (core/client/rest.py)  │
-│manual/auto │──▶ Kline/OrderBook/Trades/Funding/OI             │
+│watchlist.json│──▶ Kline/OrderBook/Trades/Funding/OI             │
 └────┬───────┘   └───────────────┬──────────────────────────────┘
      │                           │
      │                  ┌────────▼────────┐
@@ -32,7 +32,7 @@
 ┌────▼───────┐    ┌──────────────▼─────────────┐
 │Watchlist   │    │MarketSnapshotCollector     │
 │Manager     │    │+ build_market_summary      │
-│(manual/auto│    └──────────────┬─────────────┘
+│(manual)    │    └──────────────┬─────────────┘
 └────┬───────┘                   │ snapshot text
      │                           │
      │                    ┌──────▼──────┐ MarketAnalyzer
@@ -53,7 +53,7 @@
                                 │
                           ┌─────▼─────┐
                           │Trading    │ send order, log decision,
-                          │Engine     │ notify, schedule loop
+                          │Engine     │ notify, runtime loop
                           └───────────┘
 ```
 
@@ -63,7 +63,7 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `main.py` | CLI 主入口，负责 Rich 交互、线程池调度、定时调度。 |
+| `cli.py` / `okx` | 当前唯一受支持入口；`okx` 是 shell 包装，实际执行 `cli.py`。 |
 | `config/` | `settings.py` 定义 Pydantic Settings（账户、策略、运行、通知），`.env` 自动加载。 |
 | `core/client/rest.py` | 封装 OKX REST Account/Trade/Market/Public API 并做错误包装。 |
 | `core/data/features.py` | OKX K 线 → Pandas + RSI/EMA/MACD/ATR/布林/收益率/波动指标。 |
@@ -74,10 +74,10 @@
 | `core/engine/risk.py` | 账户风控（可用资金占比/交易所风控）、流动性、波动、趋势冲突。 |
 | `core/engine/execution.py` | 合约规格缓存、张数折算、滑点评估、TP/SL 附单、执行报告。 |
 | `core/data/performance.py` | 最近 N 天成交抓取、盈亏/胜率/手续费统计缓存。 |
-| `core/data/watchlist_loader.py` / `core/data/auto_watchlist.py` | 手动 + 自动 watchlist 聚合、资金过滤。 |
+| `core/data/watchlist_loader.py` | 手动 watchlist 解析、默认周期补全与运行期热加载。 |
 | `core/client/stream.py` | WebSocket 缓存 K 线/盘口/成交，REST 不足时自动回退。 |
 | `core/utils/notifications.py` | Telegram 冷却推送。 |
-| `data/` | `perf_cache.json`、`auto_watchlist.json` 等运行时缓存。 |
+| `data/` | `perf_cache.json` 等运行时缓存。 |
 | `logs/` | 滚动日志、决策记录、运行日志。 |
 
 ---
@@ -122,13 +122,7 @@ RUN_INTERVAL_MINUTES=5
 DEFAULT_MAX_POSITION=0.002
 FEATURE_LIMIT=150
 LOG_DIR=logs
-WATCHLIST_MODE=mixed            ; manual/auto/mixed
-AUTO_WATCHLIST_SIZE=5
-AUTO_WATCHLIST_TOP_N=10
-AUTO_WATCHLIST_REFRESH_HOURS=24
-AUTO_WATCHLIST_CACHE=data/auto_watchlist.json
-AUTO_WATCHLIST_TIMEFRAME=5m
-AUTO_WATCHLIST_HIGHER_TIMEFRAMES=1H
+# watchlist 直接维护在 watchlist.json
 
 # ---- Notification ----
 NOTIFY_ENABLED=false
@@ -169,17 +163,17 @@ COINGECKO_NEWS_TYPE=news
 ### 3. 启动
 
 ```bash
-python main.py
+./okx once --dry-run
 ```
 
 启动过程会：
 
-1. 展示 Rich LOGO → 打印核心配置 → 逐项加载引擎模块；
-2. `WatchlistManager` 获取监控列表（手动/自动/混合）；
-3. 为每个合约并发执行 `TradingEngine.run_once`，输出分析结果、信号、执行计划；
-4. 每 `RUN_INTERVAL_MINUTES` 分钟复用线程池循环一次（`schedule`）。
+1. 读取 `.env` 与 `watchlist.json`，组装运行时依赖；
+2. `WatchlistManager` 获取监控列表；
+3. 为每个合约执行 `TradingEngine.run_once`，输出分析结果、信号、执行计划；
+4. 若使用 `./okx run`，按 `RUN_INTERVAL_MINUTES` 持续循环。
 
-> **Dry Run**：`main.py` 中 `DRY_RUN = False`，若需仿真可切换为 `True`（仍会计算信号但不会下单）。
+> **Dry Run**：使用 `./okx once --dry-run` 或 `./okx run --dry-run`，会完整计算信号但不实际下单。
 
 ### 3.1 推荐：简洁 CLI（无交互启动）
 
@@ -232,7 +226,7 @@ ln -sf "$PWD/okx" ~/.local/bin/okx
 
 ## Watchlist 体系
 
-### 手动模式 (`WATCHLIST_MODE=manual`)
+Watchlist 现在只保留手动模式，直接维护 `watchlist.json`：
 
 编辑 `watchlist.json`：
 
@@ -269,20 +263,6 @@ ln -sf "$PWD/okx" ~/.local/bin/okx
 - **ATR/Price**：`mode=atr/price` 只提供具体价位，执行层转成 `tpTriggerPx/slTriggerPx`，若配合限价委托则会将 `order_px` 带入 `tpOrdPx/slOrdPx`，否则下发 `-1` 市价。触发价类型默认 `last`，可在 watchlist 覆盖。
 - **执行流程**：`core.engine.execution.ExecutionEngine._build_attach_algo_orders` 会优先写入比例触发字段，且附带 `tpOrdKind/slOrdKind`，符合同一订单仅允许单向止盈止损的官方限制。一旦 `trigger_ratio/trigger_px` 命中，OKX 会立即创建 reduce-only 委托，从而实现“达到比例立即平仓”的需求。
 
-### 自动模式 (`WATCHLIST_MODE=auto`)
-
-`core/data/auto_watchlist.py` 会：
-
-1. 调 OKX `GET /api/v5/market/tickers?instType=SWAP`，按 `volCcy24h` 排序；
-2. 读取账户可用资金 → 根据 `BALANCE_USAGE_RATIO × DEFAULT_LEVERAGE` 计算最大可承受名义；
-3. 按合约最小张数、合约面值、标价折算最小下单名义，过滤掉资金不足的品种；
-4. 取前 `AUTO_WATCHLIST_SIZE` 个写入 `AUTO_WATCHLIST_CACHE` 并返回；
-5. 缓存过期（`AUTO_WATCHLIST_REFRESH_HOURS`）或缓存缺失时才重新抓取。
-
-### 混合模式 (`WATCHLIST_MODE=mixed`)
-
-优先返回手动条目，再在自动列表里追加没有重名的合约。可用于「核心标的手动维护 + 补仓热度币」的场景。
-
 ---
 
 ## 策略 & 风控流水线
@@ -297,7 +277,7 @@ ln -sf "$PWD/okx" ~/.local/bin/okx
 | 风控层 | `core/engine/risk.py` | - 账户层：交易所风控标志、可用资金占比<br>- 品种层：成交量不足、近期波动超阈值、风险提示<br>- 信号层：多周期方向冲突 → 直接 HOLD，并把原因拼入 `TradeSignal.reason`。 |
 | 执行层 | `core/engine/execution.py` | - OKX instruments 缓存合约规格；自动折算 underlying ↔ contracts<br>- 根据 ATR/价格估计滑点，0.01 内 + 高置信使用限价单减少冲击<br>- 提前判定最小张数/最小下单不满足时抬升或阻断<br>- 构造 `attachAlgoOrds` 添加止盈止损。 |
 | 账户评估 | `core/data/performance.py` | 后台线程每 15 min 刷新最近 7 日成交，统计 P/L、胜率、手续费、样本数，并在控制台/通知中展示。 |
-| 通知/展示 | `core/utils/notifications.py`, `main.py` | Rich 控制台面板（账户、行情摘要、市场分析、信号、执行计划、订单回执），Telegram 冷却策略（事件类型 × inst_id 键值对）。 |
+| 通知/展示 | `core/utils/notifications.py`, `cli_app/runtime_*` | CLI 日志输出、状态视图、heartbeat 与 Telegram 冷却策略（事件类型 × inst_id 键值对）。 |
 
 ---
 
@@ -307,7 +287,6 @@ ln -sf "$PWD/okx" ~/.local/bin/okx
 | --- | --- |
 | `logs/runtime-*.log` | Loguru 滚动日志（默认保留 7 天）。 |
 | `data/perf_cache.json` | `PerformanceTracker` 缓存，存储胜率/PnL。 |
-| `data/auto_watchlist.json` | 自动 watchlist 缓存（含更新时间 + entries）。 |
 | `watchlist.json` | 手动监控列表（热加载，文件修改后下轮生效）。 |
 
 > 这些文件都可安全删除，程序会在需要时重新生成。
@@ -316,12 +295,12 @@ ln -sf "$PWD/okx" ~/.local/bin/okx
 
 ## 常见运维动作
 
-1. **Dry-Run 仿真**：`main.py` → 将 `DRY_RUN = True`，或在 `TradingEngine.run_once(... dry_run=True)` 方式中覆写。
+1. **Dry-Run 仿真**：使用 `./okx once --dry-run` 或 `./okx run --dry-run`。
 2. **扩充指标/特征**：在 `core/data/features.py` 添加自定义列，再在 `core/strategy/core.py` 消费；`build_market_summary` 会自动纳入文本描述。
-3. **新增通知渠道**：扩展 `core/utils/notifications.py`，让 `build_notifier` 返回自定义类，然后在 `main.py` 中按需 `send_notification`。
-4. **接管 watchlist**：`WATCHLIST_MODE=manual` + Git 管理 `watchlist.json`；自动模式下可通过 `.env` 调整 `AUTO_WATCHLIST_*`。
+3. **新增通知渠道**：扩展 `core/utils/notifications.py`，并在 CLI workflow 中接入新的通知调用点。
+4. **接管 watchlist**：直接用 Git 管理 `watchlist.json`。
 5. **限制资金/杠杆**：通过 `.env` 中 `BALANCE_USAGE_RATIO`、`DEFAULT_LEVERAGE`、`DEFAULT_MAX_POSITION` 控制上限，并结合 watchlist 的 `max_position` 精细调节。
-6. **手动触发一轮扫描**：运行 `python main.py`，待首轮执行完毕后 `Ctrl+C` 即可；若已在运行，可向控制台输入 `y` 通过启动确认。
+6. **手动触发一轮扫描**：运行 `./okx once`；若只想验证链路，优先使用 `./okx once --dry-run`。
 
 ---
 
@@ -330,11 +309,10 @@ ln -sf "$PWD/okx" ~/.local/bin/okx
 | 问题 | 处理方式 |
 | --- | --- |
 | **订单被阻断** | 查看控制台的执行计划/执行反馈面板：可能是资金不足、最小下单限制、滑点超阈值或 RiskManager 拦截。 |
-| **自动 watchlist 为空** | 账户可用资金 × 杠杆不足以覆盖任何候选合约的最小名义。调高 `BALANCE_USAGE_RATIO`/`DEFAULT_LEVERAGE` 或向账户划转资金。 |
 | **WebSocket 无法建立** | `core/client/stream.py` 会捕获异常并回退 REST，只要安装 `websocket-client` 即可。若网络屏蔽 8443 端口，需配置代理 (`HTTP_PROXY`)。 |
 | **性能统计始终为空** | 账户近 7 天无成交、API Key 无读成交权限或所在账户类型不支持 `get_fills`。可调用 `PerformanceTracker.get_snapshot_for_days(1)` 检查。 |
 | **通知频率太高** | `NOTIFY_LEVEL=critical` 仅推失败/阻断；`orders` 包含成功订单；`NOTIFY_COOLDOWN_SECONDS` 控制事件冷却。 |
-| **运行一段时间后占用高** | `ThreadPoolExecutor` 默认 worker≤8；定时任务常驻线程为 schedule + WebSocket，若不需要 WebSocket 可在 `main.py` 注释确保仅使用 REST。 |
+| **运行一段时间后占用高** | 优先检查 watchlist 大小、日志量和 WebSocket/REST 使用情况；当前常驻入口是 `./okx run`，不再存在旧 `main.py` 调度路径。 |
 
 ---
 

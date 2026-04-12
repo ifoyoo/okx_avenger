@@ -6,7 +6,6 @@ __pycache__/
 .env
 logs/
 *.log
-data/auto_watchlist.json
 data/config_snapshot.json
 data/runtime_heartbeat.json
 data/backtests/

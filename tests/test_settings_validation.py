@@ -50,7 +50,8 @@ def test_build_and_dump_config_snapshot(tmp_path) -> None:
 
     snapshot = build_config_snapshot(settings)
     assert snapshot["account"]["okx_api_key_set"] is True
-    assert snapshot["runtime"]["watchlist_mode"] in {"manual", "auto", "mixed"}
+    assert "watchlist_mode" not in snapshot["runtime"]
+    assert "auto_watchlist_size" not in snapshot["runtime"]
 
     path = dump_config_snapshot(settings, runtime.config_snapshot_path)
     assert path.exists()

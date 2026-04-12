@@ -263,13 +263,21 @@ def test_strategy_step_only_generates_signal_without_risk(monkeypatch) -> None:
     )
     generated_output = SimpleNamespace(marker="strategy-output")
 
-    def _fake_generate_signal(context, step_features, analysis_text, higher_features, llm_influence_enabled=False):
+    def _fake_generate_signal(
+        context,
+        step_features,
+        analysis_text,
+        higher_features,
+        llm_influence_enabled=False,
+        market_analysis=None,
+    ):
         assert isinstance(context, StrategyContext)
         assert context.inst_id == "ETH-USDT-SWAP"
         assert step_features is features
         assert analysis_text == '{"action":"hold","confidence":0.5}'
         assert higher_features == {}
         assert llm_influence_enabled is False
+        assert market_analysis is analysis_bundle.analysis_result
         return generated_output
 
     def _risk_should_not_be_called(*args, **kwargs):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple, List
+from typing import Any, Optional, Sequence, Tuple, List
 
 from core.models import SignalAction
 from .signals import ObjectiveSignal
@@ -82,6 +82,59 @@ class AnalysisInterpreter:
                 return AnalysisView(action=action, confidence=conf, reason=text.strip(), raw_text=text.strip())
         conf = self._extract_confidence(text)
         return AnalysisView(action=SignalAction.HOLD, confidence=conf, reason=text.strip(), raw_text=text.strip())
+
+    def from_market_analysis(self, analysis: Any) -> AnalysisView:
+        trend = getattr(analysis, "trend", None)
+        momentum = getattr(analysis, "momentum", None)
+        risk = getattr(analysis, "risk", None)
+        levels = getattr(analysis, "levels", None)
+
+        trend_direction = str(getattr(trend, "direction", "range") or "range")
+        trend_strength = max(0.0, min(1.0, float(getattr(trend, "strength", 0.0) or 0.0)))
+        trend_label = str(getattr(trend, "label", "") or "")
+        momentum_score = max(-1.0, min(1.0, float(getattr(momentum, "score", 0.0) or 0.0)))
+        momentum_label = str(getattr(momentum, "label", "neutral") or "neutral")
+
+        if trend_direction == "bullish" and momentum_score > 0.12:
+            action = SignalAction.BUY
+        elif trend_direction == "bearish" and momentum_score < -0.12:
+            action = SignalAction.SELL
+        else:
+            action = SignalAction.HOLD
+
+        confidence = trend_strength * 0.65 + abs(momentum_score) * 0.35
+        if action == SignalAction.HOLD:
+            confidence = min(0.45, confidence)
+        confidence = max(0.1, min(1.0, confidence))
+
+        detail_parts = []
+        if trend_label:
+            detail_parts.append(f"趋势={trend_label}")
+        detail_parts.append(f"动量={momentum_label}({momentum_score:+.2f})")
+        nearest_support = getattr(levels, "nearest_support", None)
+        nearest_resistance = getattr(levels, "nearest_resistance", None)
+        if nearest_support is not None:
+            detail_parts.append(f"最近支撑={float(nearest_support):.4f}")
+        if nearest_resistance is not None:
+            detail_parts.append(f"最近阻力={float(nearest_resistance):.4f}")
+        reason = "结构化分析：" + "；".join(detail_parts)
+
+        risk_text = ""
+        risk_factors = list(getattr(risk, "factors", []) or [])
+        if risk_factors:
+            risk_text = "；".join(str(item) for item in risk_factors)
+
+        return AnalysisView(
+            action=action,
+            confidence=confidence,
+            reason=reason,
+            risk=risk_text,
+            raw_text=reason,
+        )
+
+    @classmethod
+    def has_structured_payload(cls, text: str) -> bool:
+        return cls._extract_structured_json(text.strip()) is not None
 
     @staticmethod
     def _extract_structured_json(text: str) -> Optional[dict]:

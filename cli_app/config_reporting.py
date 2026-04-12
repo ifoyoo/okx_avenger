@@ -5,7 +5,6 @@ def format_config_summary_lines(settings) -> list[str]:
     lines = [
         "✅ 本地配置字段完整。",
         f"- base_url: {settings.account.okx_base_url}",
-        f"- watchlist_mode: {settings.runtime.watchlist_mode}",
         f"- run_interval_minutes: {settings.runtime.run_interval_minutes}",
         f"- default_leverage: {settings.strategy.default_leverage}",
         f"- llm_enabled: {settings.llm.enabled}",

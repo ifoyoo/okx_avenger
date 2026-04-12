@@ -17,7 +17,7 @@ def _load_reporting():
 def _settings(*, llm_enabled=False, news_enabled=False):
     return SimpleNamespace(
         account=SimpleNamespace(okx_base_url="https://www.okx.com"),
-        runtime=SimpleNamespace(watchlist_mode="manual", run_interval_minutes=5),
+        runtime=SimpleNamespace(run_interval_minutes=5),
         strategy=SimpleNamespace(default_leverage=3),
         llm=SimpleNamespace(enabled=llm_enabled, model="gpt-x", api_base="https://api.example.com"),
         intel=SimpleNamespace(
@@ -42,7 +42,6 @@ def test_format_config_summary_lines_without_optional_sections() -> None:
     assert lines == [
         "✅ 本地配置字段完整。",
         "- base_url: https://www.okx.com",
-        "- watchlist_mode: manual",
         "- run_interval_minutes: 5",
         "- default_leverage: 3",
         "- llm_enabled: False",

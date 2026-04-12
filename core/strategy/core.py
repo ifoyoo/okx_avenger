@@ -55,9 +55,17 @@ class Strategy:
         analysis_text: str,
         higher_features: Optional[Dict[str, pd.DataFrame]] = None,
         llm_influence_enabled: bool = False,
+        market_analysis: Optional[object] = None,
     ) -> StrategyOutput:
         objective_signals = self.signal_generator.build(features, higher_features)
-        analysis_view = self.analysis_interpreter.parse(analysis_text)
+        parsed_analysis_view = self.analysis_interpreter.parse(analysis_text)
+        structured_analysis_view = (
+            self.analysis_interpreter.from_market_analysis(market_analysis)
+            if market_analysis is not None else None
+        )
+        analysis_view = parsed_analysis_view
+        if structured_analysis_view is not None and not self.analysis_interpreter.has_structured_payload(analysis_text):
+            analysis_view = structured_analysis_view
         llm_guard = LLMInfluenceGuard(
             enabled=bool(llm_influence_enabled),
             max_confidence_delta=self._llm_influence_guard.max_confidence_delta,

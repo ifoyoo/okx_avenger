@@ -462,6 +462,7 @@ class TradingEngine:
             analysis_bundle.strategy_analysis_text,
             data_bundle.higher_features,
             llm_influence_enabled=analysis_bundle.brain_decision is not None,
+            market_analysis=analysis_bundle.analysis_result,
         )
         return StrategyBundle(
             context=context,
@@ -718,6 +719,17 @@ class TradingEngine:
                 risk_note=risk_note,
                 account_snapshot=account_snapshot,
                 market_intel=market_intel.to_dict() if market_intel else None,
+                structured_market_analysis={
+                    "trend_direction": analysis_result.trend.direction,
+                    "trend_strength": analysis_result.trend.strength,
+                    "trend_label": analysis_result.trend.label,
+                    "momentum_score": analysis_result.momentum.score,
+                    "momentum_label": analysis_result.momentum.label,
+                    "supports": list(analysis_result.levels.supports),
+                    "resistances": list(analysis_result.levels.resistances),
+                    "risk_factors": list(analysis_result.risk.factors),
+                },
+                structured_market_intel=market_intel.to_dict() if market_intel else None,
             )
         except Exception as exc:  # pragma: no cover
             logger.warning("LLM 分析失败 inst={inst} err={err}", inst=inst_id, err=exc)

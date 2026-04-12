@@ -4,6 +4,87 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-12 - D0019 - 仓库清理以“当前实现可运行且可交付”为边界
+- 背景：用户要求清理项目目录中与当前实现无关的代码、文件和文件夹，并将结果推送远端。
+- 决策：
+  - 删除已废弃的自动 watchlist 实现、旧 OKX 静态文档快照和本地旧 worktree。
+  - README 只保留当前真实入口 `./okx` / `python cli.py`，去掉 `main.py`、Rich 启动页、确认交互等失效说明。
+  - 保留当前运行必须的代码、测试、交接文档和开发环境，不把未收口的 backtest 本地改动混入本次提交。
+- 原因：仓库清理的目标是提高可维护性和可读性，而不是破坏当前可运行环境；需要在“彻底”与“安全”之间收住边界。
+- 影响：远端仓库将更贴近当前真实实现；本地开发残留明显减少；未纳入本次提交的 backtest 改动继续保留在本地工作区。
+- 回滚方案：若后续确认某个被删除的资料文件仍需保留，应以当前实现为基准重新引入，而不是恢复整套旧路径。
+
+### 2026-04-12 - D0018 - Watchlist 收口为纯手动模式，不再保留 auto/mixed
+- 背景：交付后观测期需要稳定输入集合，自动/混合选币会让监控标的漂移；用户明确要求把自动模式清理掉。
+- 决策：
+  - 删除 `WATCHLIST_MODE` 与所有 `AUTO_WATCHLIST_*` 配置项。
+  - `WatchlistManager` 改为只读取 `watchlist.json`，不再根据模式切换来源。
+  - 删除 `core/data/auto_watchlist.py` 与对应测试，文档改为手动 watchlist 单一路径。
+- 原因：观测期最重要的是可复现和可解释，固定标的集合比动态选币更容易定位问题，也更符合当前交付阶段目标。
+- 影响：运行标的完全由 `watchlist.json` 决定；后续如要切换监控池，直接改文件而不是改模式或自动筛选阈值。
+- 回滚方案：如未来确实需要重启动态选币，应以新需求重新设计，而不是恢复这次删除的旧实现。
+
+### 2026-04-12 - D0017 - LLM prompt 改为显式消费 structured market/intel context
+- 背景：前 3 个阶段已把市场分析和 intel 结构化，但 `LLMBrain` 仍主要依赖长文本和原始 dict dump，等于让模型重复做一次解析。
+- 决策：
+  - 为 `LLMBrain.analyze(...)` 增加 `structured_market_analysis` 与 `structured_market_intel` 可选参数。
+  - `TradingEngine` 负责将 `analysis_result` 与 `market_intel` 压成 compact structured block 传给 `LLMBrain`。
+  - 保留 `deterministic_summary` / `deterministic_analysis` 作为补充上下文，不再是唯一结构来源。
+- 原因：让前面已完成的结构化 contract 真正进入 LLM 输入，提高稳定性，并减少 prompt 里“靠长文本二次解析”的损耗。
+- 影响：LLM prompt 质量提升，但不改变调用方是否启用 LLM 的主开关与 guard 机制。
+- 回滚方案：如兼容性出现问题，可去掉 structured 参数，仅保留旧文本字段。
+
+### 2026-04-12 - D0016 - Strategy/Fusion 优先消费 `MarketAnalysis v2` 而不是自由文本
+- 背景：`market.py` 已升级为结构化 contract，但 `Strategy.generate_signal(...)` 仍主要消费 `analysis_text`，导致确定性分析在融合层经常退化为 `HOLD + 0.5`。
+- 决策：
+  - `Strategy.generate_signal(...)` 增加 `market_analysis` 可选输入。
+  - `AnalysisInterpreter` 增加 `from_market_analysis()`，把结构化趋势/动量/风险转为 `AnalysisView`。
+  - 当 `analysis_text` 不是结构化 JSON 时，优先使用 `market_analysis` 生成的 structured view。
+- 原因：前面重构出的结构化分析必须直接进入融合层，否则市场分析质量提升不会落到真实决策上。
+- 影响：确定性模式下策略融合不再只依赖自由文本；LLM JSON 路径保持兼容。
+- 回滚方案：如 structured view 效果不佳，可退回纯文本解释路径，但保留 `market_analysis` 入参。
+
+### 2026-04-12 - D0015 - Intel 对所有 provider 统一 relevance scoring 与加权聚合
+- 背景：原有 `intel` 只对 CoinGecko 泛新闻做 alias relevance 过滤，NewsAPI 主要依赖查询词，仍会混入弱相关或泛行业新闻。
+- 决策：
+  - 所有 provider 的 article 都统一经过 relevance scoring/filtering。
+  - `NewsHeadline` 增加 `relevance_score` / `matched_aliases`；`MarketIntelSnapshot` 增加 `analysis_version` / `avg_relevance_score` / `provider_counts` / `matched_aliases`。
+  - `sentiment_score` 与 `event_tags` 聚合改为 relevance-weighted。
+- 原因：如果 intel 本身不先把“有多相关”建模，下游 `fusion` 和 `llm` 仍会吃到真假相关混杂的输入。
+- 影响：宏观但不指向资产本身的新闻更容易被过滤掉；snapshot 更适合复盘与下游消费。
+- 回滚方案：如过滤过严，可调低 relevance 阈值或临时回退到 query-only 过滤策略。
+
+### 2026-04-12 - D0014 - 第 1 阶段市场分析重构采用“structured assessment first”
+- 背景：用户要求后续按我的判断连续推进“市场分析 / intel / fusion / llm”四个方向，但如果一开始就同时动四块，会失去归因能力。
+- 决策：
+  - 先只做第 1 阶段：[`core/analysis/market.py`](/Users/t/Desktop/Python/okx/core/analysis/market.py)。
+  - 在 `market.py` 内部引入 `TrendAssessment`、`MomentumAssessment`、`LevelAssessment`、`RiskAssessment` 四类结构化结果。
+  - `MarketAnalysis` 保留旧字段并新增 `trend/momentum/levels/risk/analysis_version`，旧字段由新结构回填。
+  - 文本分析从“独立判断层”改为 assessment 渲染层，不再允许结构结果和文本各跑一套逻辑。
+- 原因：后续 `fusion` 与 `llm` 需要的是稳定、可解释的确定性输入；先把 market contract 做干净，比继续堆 prompt 或调权重更有基础价值。
+- 影响：`MarketAnalysis` 兼容性保留；后续阶段可以逐步改为直接消费 assessment，而不是继续解析自由文本。
+- 回滚方案：如新结构证明没有收益，可退回只保留旧字段的输出形式，但不恢复“文本和结构各自判断”的双路径。
+
+### 2026-04-11 - D0013 - 回测结果持久化从 `backtest_helpers` 拆到独立 storage 模块
+- 背景：CLI command package 拆分后，`backtest_helpers.py` 同时承担数值计算、摘要打印和回测文件读写，职责边界开始混杂。
+- 决策：
+  - 新增 `cli_app/backtest_storage.py`，集中放置 `BACKTEST_DIR/BACKTEST_LATEST`、`_serialize_backtest_record`、`_save_backtest_records`、`_load_backtest_records`。
+  - `cli_app/backtest_workflows.py` 改为显式依赖 storage 模块，`backtest_helpers.py` 只保留回测评分、市场状态分桶、摘要打印等纯 helper 逻辑。
+  - 增加 `tests/test_cli_backtest_storage.py` 锁定存储模块契约。
+- 原因：把“回测结果落盘”从纯计算 helper 中剥离后，backtest workflow 的依赖关系更清晰，也更便于后续替换存储路径或格式而不污染计算逻辑。
+- 影响：`backtest_helpers.py` 体积进一步缩小；回测持久化职责有独立测试保护；`report_backtest` 默认读取 `BACKTEST_LATEST` 的行为不变。
+- 回滚方案：如后续证明 storage 模块拆分没有收益，可把三个存储函数与常量并回 `backtest_helpers.py`，但保留现有测试契约。
+
+### 2026-04-11 - D0012 - N2 follow-up 采用 `cli_app/` 命令包承载 CLI 内部实现
+- 背景：`main.py` 删除后，`cli.py` 仍继续累积参数定义、命令注册、workflow、状态展示与回测辅助职责，虽保持单入口但内部边界仍不稳。
+- 决策：
+  - 保留 `cli.py` 作为唯一真实入口文件，只暴露 `build_parser()` 与 `main()` facade。
+  - 引入 `cli_app/` 包承载内部实现，并按 parser / registry / commands / workflows / reporting / helpers / storage 分层拆分。
+  - 顶层命令名继续保持 `once/run/status/config-check/backtest/strategies`，不引入目录扫描式自动注册，也不恢复第二入口。
+- 原因：用户契约需要稳定，但内部实现需要继续降复杂度；把 CLI 作为应用壳层而不是交易核心层的一部分，更符合仓库当前边界。
+- 影响：`./okx ...` 与 `python cli.py ...` 的对外行为保持不变；CLI 代码可在更小模块内继续迭代；`cli.py` 不再承担过载实现。
+- 回滚方案：若 `cli_app/` 分层被证明增加维护成本，可把部分小模块并回 workflow 层，但不恢复 `main.py` 或多入口结构。
+
 ### 2026-04-10 - D0011 - N2 收口为 `cli.py` 单入口并删除 `main.py`
 - 背景：`cli.py` 已具备完整 runtime/heartbeat/命令分发能力，但仓库仍保留 `main.py` 的 Rich 启动界面、确认交互和独立调度，导致入口重复。
 - 决策：
