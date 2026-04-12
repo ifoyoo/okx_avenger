@@ -1,4 +1,4 @@
-# OKX Avenger
+# OKX Avenger (OKX 复仇者)
 
 > Not here to look smart.  
 > Here to stay alive long enough to fire the next order.
@@ -6,7 +6,7 @@
 > Market does not care about your feelings.  
 > Your stop loss should not care either.
 
-一个面向 OKX 永续合约的轻量自动交易 runtime。
+操他妈的 OKX，上次害我亏了10U，所以这是一个面向 OKX 合约复仇的轻量自动交易程序，我期待再次爆仓，娱乐玩具勿当真。
 
 当前版本的方向很明确：
 - 手动 `watchlist.json`
@@ -17,8 +17,6 @@
 - 默认先用 `--dry-run`
 
 ## What It Is
-
-这不是“量化平台”那种假大空玩具。
 
 这就是一套干脆的 OKX 合约运行框架：
 - 盯住少数标的
@@ -152,3 +150,7 @@ LLM_MAX_TOKENS=4096
 这是一套尽量把数据、风控、执行和通知接干净的 OKX 合约运行框架。
 
 想活久一点，就先尊重仓位、尊重止损、尊重现实。
+
+上面是装逼的，我很快会爆仓。
+
+狗头狗头。
