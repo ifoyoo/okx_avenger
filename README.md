@@ -135,6 +135,20 @@ pip install -r requirements.txt -c constraints.txt
 ./okx status
 ```
 
+部署到 VPS 并一键更新：
+
+```bash
+./scripts/deploy_netcup.sh
+./scripts/deploy_netcup.sh --sync-env --sync-watchlist
+```
+
+如果你已经在 VPS 上，只想更新代码并重启服务：
+
+```bash
+cd /root/apps/okx_avenger
+./scripts/update_vps.sh
+```
+
 回测：
 
 ```bash
