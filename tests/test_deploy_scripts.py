@@ -31,6 +31,8 @@ def test_local_deploy_script_pushes_and_can_sync_runtime_files() -> None:
     assert "--sync-env" in content
     assert "--sync-watchlist" in content
     assert "scp" in content
+    assert "git fetch origin" in content
+    assert "git pull --ff-only origin" in content
     assert "scripts/update_vps.sh" in content
 
 

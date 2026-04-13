@@ -90,4 +90,4 @@ if [[ "${SYNC_WATCHLIST}" == "1" ]]; then
 fi
 
 echo "Running remote update script on ${REMOTE_HOST}"
-ssh "${REMOTE_HOST}" "cd '${REMOTE_DIR}' && REMOTE_BRANCH='${REMOTE_BRANCH}' SERVICE_NAME='${SERVICE_NAME}' bash './scripts/update_vps.sh'"
+ssh "${REMOTE_HOST}" "set -euo pipefail; cd '${REMOTE_DIR}'; git fetch origin \"${REMOTE_BRANCH}\"; if git show-ref --verify --quiet \"refs/heads/${REMOTE_BRANCH}\"; then git checkout \"${REMOTE_BRANCH}\"; else git checkout -B \"${REMOTE_BRANCH}\" \"origin/${REMOTE_BRANCH}\"; fi; git pull --ff-only origin \"${REMOTE_BRANCH}\"; REMOTE_BRANCH='${REMOTE_BRANCH}' SERVICE_NAME='${SERVICE_NAME}' bash './scripts/update_vps.sh'"
