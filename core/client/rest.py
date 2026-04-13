@@ -317,10 +317,15 @@ class OKXClient:
         return resp.get("data") or []
 
     def list_conditional_algos(self, inst_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self.list_algo_orders(inst_id=inst_id, ord_type="conditional")
+
+    def list_algo_orders(self, inst_id: Optional[str] = None, ord_type: str = "oco") -> List[Dict[str, Any]]:
         inst_type = self._infer_inst_type(inst_id) if inst_id else ""
         try:
-            resp = self._algo.get_orders_algo_pending(
-                ordType="conditional",
+            resp = self._request(
+                "orders_algo_pending",
+                self._algo.get_orders_algo_pending,
+                ordType=ord_type,
                 instType=inst_type,
                 instId=inst_id or "",
             )
@@ -328,6 +333,80 @@ class OKXClient:
             logger.warning(f"查询策略委托失败 inst={inst_id} err={exc}")
             return []
         return resp.get("data") or []
+
+    def place_algo_order(
+        self,
+        *,
+        inst_id: str,
+        td_mode: str,
+        side: str,
+        ord_type: str = "oco",
+        pos_side: Optional[str] = None,
+        tp_trigger_px: Optional[str] = None,
+        tp_order_px: Optional[str] = None,
+        tp_trigger_px_type: Optional[str] = None,
+        sl_trigger_px: Optional[str] = None,
+        sl_order_px: Optional[str] = None,
+        sl_trigger_px_type: Optional[str] = None,
+        size: Optional[str] = None,
+        close_fraction: Optional[str] = None,
+        reduce_only: bool = True,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "instId": inst_id,
+            "tdMode": td_mode,
+            "side": side,
+            "ordType": ord_type or "oco",
+            "posSide": pos_side or "",
+            "sz": size or "",
+            "closeFraction": close_fraction or "",
+            "tpTriggerPx": tp_trigger_px or "",
+            "tpOrdPx": tp_order_px or "",
+            "tpTriggerPxType": tp_trigger_px_type or "",
+            "slTriggerPx": sl_trigger_px or "",
+            "slOrdPx": sl_order_px or "",
+            "slTriggerPxType": sl_trigger_px_type or "",
+            "reduceOnly": reduce_only,
+            "proxy_host": getattr(self._algo, "proxy_host", None),
+        }
+        return self._request(
+            "place_algo_order",
+            self._algo.send_request,
+            *algo_api._AlgoTradeEndpoints.set_order_algo,
+            **payload,
+        )
+
+    def amend_algo_order(
+        self,
+        *,
+        inst_id: str,
+        algo_id: str,
+        new_size: Optional[str] = None,
+        new_tp_trigger_px: Optional[str] = None,
+        new_tp_order_px: Optional[str] = None,
+        new_sl_trigger_px: Optional[str] = None,
+        new_sl_order_px: Optional[str] = None,
+        new_tp_trigger_px_type: Optional[str] = None,
+        new_sl_trigger_px_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "instId": inst_id,
+            "algoId": algo_id,
+            "newSz": new_size or "",
+            "newTpTriggerPx": new_tp_trigger_px or "",
+            "newTpOrdPx": new_tp_order_px or "",
+            "newSlTriggerPx": new_sl_trigger_px or "",
+            "newSlOrdPx": new_sl_order_px or "",
+            "newTpTriggerPxType": new_tp_trigger_px_type or "",
+            "newSlTriggerPxType": new_sl_trigger_px_type or "",
+            "proxy_host": getattr(self._algo, "proxy_host", None),
+        }
+        return self._request(
+            "amend_algo_order",
+            self._algo.send_request,
+            *algo_api._AlgoTradeEndpoints.set_amend_algos,
+            **payload,
+        )
 
     def cancel_algo_orders(self, entries: Sequence[Dict[str, str]]) -> None:
         payload = []
@@ -340,7 +419,22 @@ class OKXClient:
         if not payload:
             return
         try:
-            self._algo.send_request(*algo_api._AlgoTradeEndpoints.set_cancel_algos, payload)
+            response = self._request(
+                "cancel_algo_orders",
+                self._algo.send_request,
+                *algo_api._AlgoTradeEndpoints.set_cancel_algos,
+                payload,
+                proxy_host=getattr(self._algo, "proxy_host", None),
+            )
+            error = response.get("error") if isinstance(response, dict) else None
+            if isinstance(error, dict):
+                logger.warning(
+                    "撤销旧策略委托失败 payload={} code={} msg={}",
+                    payload,
+                    error.get("code") or "-",
+                    error.get("message") or "-",
+                )
+                return
             logger.info(
                 "Cancelled {} stale algo orders: {}", len(payload), ", ".join(item["algoId"] for item in payload)
             )

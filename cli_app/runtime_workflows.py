@@ -8,6 +8,7 @@ from pathlib import Path
 from loguru import logger
 
 from cli_app.context import RuntimeBundle
+from cli_app.runtime_execution import _configure_protection_monitor
 from cli_app.runtime_reporting import format_runtime_status_lines
 from cli_app.runtime_execution import log_strategy_snapshot, run_runtime_cycle
 from cli_app.runtime_helpers import (
@@ -31,9 +32,32 @@ def _notify_runtime_failure(bundle: RuntimeBundle, *, detail: str) -> None:
     notifier.publish(NotificationEvent(kind="runtime_error", detail=detail))
 
 
+def sync_protection_orders(bundle: RuntimeBundle) -> int:
+    monitor = getattr(bundle, "protection_monitor", None)
+    if monitor is None:
+        logger.warning("保护单同步未启用：当前默认止盈止损均为 0。")
+        return 1
+
+    account_snapshot = _safe_account_snapshot(bundle.engine)
+    entries = bundle.watchlist_manager.get_watchlist(account_snapshot)
+    _configure_protection_monitor(bundle, entries)
+    positions = bundle.okx.get_positions(inst_type="SWAP").get("data") or []
+    before_oco = bundle.okx.list_algo_orders(ord_type="oco")
+    before_conditional = bundle.okx.list_algo_orders(ord_type="conditional")
+    logger.info("protection sync start positions={} algo_total={}", len(positions), len(before_oco) + len(before_conditional))
+    monitor.enforce()
+    after_oco = bundle.okx.list_algo_orders(ord_type="oco")
+    after_conditional = bundle.okx.list_algo_orders(ord_type="conditional")
+    logger.info("protection sync done positions={} algo_total={}", len(positions), len(after_oco) + len(after_conditional))
+    return 0
+
+
 def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     heartbeat_path = Path(bundle.settings.runtime.runtime_heartbeat_path)
+    monitor = getattr(bundle, "protection_monitor", None)
     try:
+        if monitor is not None and not bool(getattr(args, "dry_run", False)):
+            monitor.start()
         _write_runtime_heartbeat(path=heartbeat_path, status="running", cycle=1)
         log_strategy_snapshot(bundle)
         exit_code = run_runtime_cycle(bundle, args)
@@ -43,15 +67,21 @@ def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         _write_runtime_heartbeat(path=heartbeat_path, status="error", cycle=1, exit_code=2, detail=str(exc))
         _notify_runtime_failure(bundle, detail=str(exc))
         raise
+    finally:
+        if monitor is not None and not bool(getattr(args, "dry_run", False)):
+            monitor.stop()
 
 
 def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     heartbeat_path = Path(bundle.settings.runtime.runtime_heartbeat_path)
     interval = max(1, int(args.interval_minutes or bundle.settings.runtime.run_interval_minutes))
+    monitor = getattr(bundle, "protection_monitor", None)
     logger.info("进入循环模式，间隔 {} 分钟（Ctrl+C 退出）", interval)
     log_strategy_snapshot(bundle)
     cycle = 0
     try:
+        if monitor is not None and not bool(getattr(args, "dry_run", False)):
+            monitor.start()
         while True:
             cycle += 1
             started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -70,6 +100,9 @@ def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         _write_runtime_heartbeat(path=heartbeat_path, status="error", cycle=cycle, exit_code=2, detail=str(exc))
         _notify_runtime_failure(bundle, detail=str(exc))
         raise
+    finally:
+        if monitor is not None and not bool(getattr(args, "dry_run", False)):
+            monitor.stop()
 
 
 def show_runtime_status(bundle: RuntimeBundle) -> int:

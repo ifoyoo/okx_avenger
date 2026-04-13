@@ -95,6 +95,16 @@ def test_runtime_parser_module_registers_status() -> None:
     assert args.command == "status"
 
 
+def test_runtime_parser_module_registers_sync_protection() -> None:
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    register_runtime_commands(sub)
+
+    args = parser.parse_args(["sync-protection"])
+
+    assert args.command == "sync-protection"
+
+
 def test_runtime_parser_uses_feature_limit_setting(monkeypatch) -> None:
     monkeypatch.setattr(
         runtime_parser,

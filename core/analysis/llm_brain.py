@@ -117,6 +117,11 @@ def _score_decision_quality(parsed: Dict[str, Any], raw_text: str) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    text = str(exc or "").strip().lower()
+    return "429" in text or "too many requests" in text
+
+
 def _compact_market_analysis_payload(value: Any) -> Dict[str, Any]:
     if value is None:
         return {}
@@ -180,6 +185,11 @@ class LLMBrain:
         self.max_tokens = int(getattr(settings, "max_tokens", 320) or 320)
         self.min_quality_score = max(0.0, min(1.0, float(getattr(settings, "min_quality_score", 0.45) or 0.45)))
         self.reject_missing_reason = bool(getattr(settings, "reject_missing_reason", True))
+        self.rate_limit_cooldown_seconds = max(
+            0.0,
+            float(getattr(settings, "rate_limit_cooldown_seconds", 300.0) or 300.0),
+        )
+        self._rate_limit_cooldown_until = 0.0
 
     @property
     def ready(self) -> bool:
@@ -286,6 +296,9 @@ class LLMBrain:
         return decision
 
     def _chat(self, user_prompt: str) -> Optional[str]:
+        now = time.time()
+        if self._rate_limit_cooldown_until > now:
+            return None
         endpoint = f"{self.api_base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -328,6 +341,8 @@ class LLMBrain:
                 return "\n".join(part for part in parts if part).strip() or None
             return None
         except Exception as exc:  # pragma: no cover
+            if _is_rate_limit_error(exc) and self.rate_limit_cooldown_seconds > 0:
+                self._rate_limit_cooldown_until = time.time() + self.rate_limit_cooldown_seconds
             logger.warning("LLMBrain 请求失败: {}", exc)
             return None
 

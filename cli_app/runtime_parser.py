@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cli_app.commands.runtime import cmd_once, cmd_run, cmd_status
+from cli_app.commands.runtime import cmd_once, cmd_run, cmd_status, cmd_sync_protection
 from cli_app.runtime_helpers import DEFAULT_LIMIT, DEFAULT_TIMEFRAME
 from config.settings import get_settings
 
@@ -37,3 +37,6 @@ def register_runtime_commands(subparsers) -> None:
 
     p_status = subparsers.add_parser("status", help="查看账户、持仓、watchlist 状态")
     p_status.set_defaults(func=cmd_status)
+
+    p_sync = subparsers.add_parser("sync-protection", help="同步并清理交易所保护单")
+    p_sync.set_defaults(func=cmd_sync_protection)

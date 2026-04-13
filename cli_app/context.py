@@ -11,6 +11,7 @@ from core.analysis import MarketAnalyzer
 from core.client import OKXClient
 from core.data.performance import PerformanceTracker
 from core.data.watchlist_loader import WatchlistManager
+from core.engine import ProtectionOrderManager, ProtectionThresholds
 from core.engine.trading import TradingEngine
 from core.strategy.core import Strategy
 from core.utils import NotificationCenter, build_notification_center
@@ -24,8 +25,15 @@ class RuntimeBundle:
     watchlist_manager: WatchlistManager
     perf_tracker: PerformanceTracker
     notifier: NotificationCenter | None
+    protection_monitor: ProtectionOrderManager | None = None
 
     def close(self) -> None:
+        monitor = getattr(self, "protection_monitor", None)
+        if monitor is not None:
+            try:
+                monitor.stop()
+            except Exception:
+                pass
         try:
             self.okx.close()
         except Exception:
@@ -59,6 +67,18 @@ def build_runtime() -> RuntimeBundle:
     engine = TradingEngine(okx, analyzer, strategy, settings, market_stream=None)
     watchlist_manager = WatchlistManager(okx, settings)
     perf_tracker = PerformanceTracker(okx)
+    default_tp = max(0.0, float(settings.strategy.default_take_profit_pct or 0.0))
+    default_sl = max(0.0, float(settings.strategy.default_stop_loss_pct or 0.0))
+    protection_monitor = None
+    if default_tp > 0 or default_sl > 0:
+        protection_monitor = ProtectionOrderManager(
+            okx_client=okx,
+            thresholds=ProtectionThresholds(
+                take_profit_pct=default_tp,
+                stop_loss_pct=default_sl,
+            ),
+            default_td_mode=settings.account.okx_td_mode or "cross",
+        )
     notifier = build_notification_center(
         enabled=settings.notification.enabled,
         bot_token=settings.notification.telegram_bot_token,
@@ -74,4 +94,5 @@ def build_runtime() -> RuntimeBundle:
         watchlist_manager=watchlist_manager,
         perf_tracker=perf_tracker,
         notifier=notifier,
+        protection_monitor=protection_monitor,
     )

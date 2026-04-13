@@ -297,3 +297,37 @@ def test_llm_brain_chat_requests_json_response_format(monkeypatch) -> None:
 
     assert brain._chat("hello") == '{"action":"buy","confidence":0.8,"reason":"ok"}'
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_llm_brain_chat_enters_cooldown_after_rate_limit(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        enabled=True,
+        provider="openai_compatible",
+        api_base="https://example.com/v1",
+        api_key="test-key",
+        model="test-model",
+        timeout_seconds=3.0,
+        temperature=0.1,
+        max_tokens=128,
+        min_quality_score=0.1,
+        reject_missing_reason=False,
+        rate_limit_cooldown_seconds=60.0,
+    )
+    brain = LLMBrain(settings)
+    current_time = {"value": 1000.0}
+    calls = {"count": 0}
+
+    def _fake_post(*args, **kwargs):
+        calls["count"] += 1
+        raise RuntimeError("429 Client Error: Too Many Requests for url")
+
+    monkeypatch.setattr("core.analysis.llm_brain.requests.post", _fake_post)
+    monkeypatch.setattr("core.analysis.llm_brain.time.time", lambda: current_time["value"])
+
+    assert brain._chat("hello") is None
+    assert calls["count"] == 1
+
+    current_time["value"] += 1.0
+
+    assert brain._chat("hello-again") is None
+    assert calls["count"] == 1

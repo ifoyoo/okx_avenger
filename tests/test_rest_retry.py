@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from okx.api import algotrade as algo_api
+
 from core.client.rest import OKXClient
 
 
@@ -29,3 +31,41 @@ def test_request_retries_on_rate_limit(monkeypatch) -> None:
 
     assert called["n"] == 2
     assert "error" not in result
+
+
+def test_cancel_algo_orders_passes_proxy_host_and_payload() -> None:
+    client = object.__new__(OKXClient)
+    calls = []
+
+    class _Algo:
+        proxy_host = "https://proxy.example"
+
+        def send_request(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return {"code": "0", "data": []}
+
+    client._algo = _Algo()
+    client._max_retries = 0
+    client._retry_backoff = 0.0
+
+    OKXClient.cancel_algo_orders(
+        client,
+        [
+            {"algoId": "a1", "instId": "BTC-USDT-SWAP"},
+            {"algoId": "a2", "instId": "ETH-USDT-SWAP"},
+        ],
+    )
+
+    assert calls == [
+        (
+            (
+                algo_api._AlgoTradeEndpoints.set_cancel_algos[0],
+                algo_api._AlgoTradeEndpoints.set_cancel_algos[1],
+                [
+                    {"algoId": "a1", "instId": "BTC-USDT-SWAP"},
+                    {"algoId": "a2", "instId": "ETH-USDT-SWAP"},
+                ],
+            ),
+            {"proxy_host": "https://proxy.example"},
+        )
+    ]

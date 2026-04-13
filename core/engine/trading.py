@@ -187,6 +187,7 @@ class TradingEngine:
         positions_snapshot: Optional[List[Dict[str, Any]]] = None,
         perf_stats: Optional[Dict[str, Any]] = None,
         daily_stats: Optional[Dict[str, Any]] = None,
+        exchange_protection_enabled: bool = True,
     ) -> Dict[str, Any]:
         """执行一次完整流程."""
 
@@ -250,6 +251,7 @@ class TradingEngine:
                 max_position=max_position,
                 higher_timeframes=higher_timeframes,
                 protection_overrides=protection_overrides,
+                exchange_protection_enabled=exchange_protection_enabled,
                 data_bundle=data_bundle,
                 analysis_bundle=analysis_bundle,
             )
@@ -440,6 +442,7 @@ class TradingEngine:
         max_position: float,
         higher_timeframes: Optional[Tuple[str, ...]],
         protection_overrides: Optional[Dict[str, Any]],
+        exchange_protection_enabled: bool,
         data_bundle: DataBundle,
         analysis_bundle: AnalysisBundle,
     ) -> StrategyBundle:
@@ -454,7 +457,7 @@ class TradingEngine:
             higher_timeframes=tuple(higher_timeframes or ()),
             account_equity=data_bundle.account_snapshot.get("equity"),
             available_balance=data_bundle.account_snapshot.get("available"),
-            protection=build_protection_settings(protection_config),
+            protection=build_protection_settings(protection_config) if exchange_protection_enabled else None,
         )
         strategy_output = self.strategy.generate_signal(
             context,
@@ -546,6 +549,17 @@ class TradingEngine:
             execution_plan.protection = None
             execution_plan.notes = tuple(execution_plan.notes) + (pending_reason,)
             exec_logger.warning("event=pending_order_blocked reason={reason}", reason=pending_reason)
+        if (
+            not execution_plan.blocked
+            and signal.action in {SignalAction.BUY, SignalAction.SELL}
+            and self.execution_engine.has_same_direction_position(inst_id, signal.action)
+        ):
+            position_reason = f"存在同向持仓：{inst_id} 当前已有同向持仓，跳过重复开仓。"
+            execution_plan.blocked = True
+            execution_plan.block_reason = position_reason
+            execution_plan.protection = None
+            execution_plan.notes = tuple(execution_plan.notes) + (position_reason,)
+            exec_logger.warning("event=same_direction_position_blocked reason={reason}", reason=position_reason)
         execution_report: Optional[ExecutionReport] = None
         order_result: Optional[Dict[str, Any]] = None
         if not dry_run and not execution_plan.blocked:

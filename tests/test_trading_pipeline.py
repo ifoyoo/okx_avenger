@@ -166,6 +166,7 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
         max_position,
         higher_timeframes,
         protection_overrides,
+        exchange_protection_enabled,
         data_bundle,
         analysis_bundle,
     ):
@@ -176,6 +177,7 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
         assert max_position == 0.01
         assert higher_timeframes == ("1H",)
         assert protection_overrides == {"take_profit": {"mode": "percent", "value": 0.02}}
+        assert exchange_protection_enabled is True
         assert data_bundle is data_step_output
         assert analysis_bundle is analysis_step_output
         return strategy_step_output
@@ -293,11 +295,58 @@ def test_strategy_step_only_generates_signal_without_risk(monkeypatch) -> None:
         max_position=0.02,
         higher_timeframes=("1H",),
         protection_overrides=None,
+        exchange_protection_enabled=True,
         data_bundle=data_bundle,
         analysis_bundle=analysis_bundle,
     )
 
     assert bundle.strategy_output is generated_output
+
+
+def test_strategy_step_omits_exchange_protection_when_disabled(monkeypatch) -> None:
+    engine = _build_engine()
+    features = _sample_features()
+    data_bundle = DataBundle(
+        features=features,
+        higher_features={},
+        snapshot={"mock": True},
+        account_snapshot={"equity": 1000.0, "available": 600.0},
+        risk_note=None,
+    )
+    analysis_bundle = AnalysisBundle(
+        analysis_result=MarketAnalysis(text="analysis", summary="summary", history_hint="hint"),
+        analysis_text="analysis",
+        strategy_analysis_text='{"action":"buy","confidence":0.8}',
+        brain_decision=None,
+        market_intel=None,
+    )
+
+    def _fake_generate_signal(
+        context,
+        step_features,
+        analysis_text,
+        higher_features,
+        llm_influence_enabled=False,
+        market_analysis=None,
+    ):
+        assert context.protection is None
+        return SimpleNamespace(marker="strategy-output")
+
+    monkeypatch.setattr(engine, "strategy", SimpleNamespace(generate_signal=_fake_generate_signal))
+
+    bundle = engine._run_strategy_step(
+        inst_id="ETH-USDT-SWAP",
+        timeframe="15m",
+        dry_run=False,
+        max_position=0.02,
+        higher_timeframes=("1H",),
+        protection_overrides={"take_profit": {"mode": "percent", "value": 0.06}},
+        exchange_protection_enabled=False,
+        data_bundle=data_bundle,
+        analysis_bundle=analysis_bundle,
+    )
+
+    assert bundle.strategy_output.marker == "strategy-output"
 
 
 def test_run_once_structured_logs_with_trace_id(monkeypatch) -> None:
@@ -503,6 +552,55 @@ def test_execution_step_blocks_when_live_pending_order_exists(monkeypatch) -> No
     assert bundle.plan.blocked is True
     assert bundle.report is None
     assert "未成交委托" in (bundle.plan.block_reason or "")
+
+
+def test_execution_step_blocks_when_same_direction_position_exists(monkeypatch) -> None:
+    engine = _build_engine()
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="market",
+        size=0.01,
+        price=None,
+        est_slippage=0.0,
+    )
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    engine.execution_engine.okx = SimpleNamespace(
+        get_positions=lambda inst_type="SWAP": {
+            "data": [
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "posSide": "net",
+                    "pos": "1",
+                }
+            ]
+        }
+    )
+
+    def _should_not_execute(_plan):
+        raise AssertionError("same-direction position should block duplicate execution")
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _should_not_execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+    )
+
+    assert bundle.plan.blocked is True
+    assert bundle.report is None
+    assert "同向持仓" in (bundle.plan.block_reason or "")
 
 
 def test_feature_min_samples_gate() -> None:

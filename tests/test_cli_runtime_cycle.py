@@ -86,13 +86,38 @@ class _FakeNotifier:
         self.events.append(event)
 
 
-def _make_bundle(entries, *, failing_inst_ids=()):
+class _FakeProtectionMonitor:
+    def __init__(self):
+        self.thresholds = []
+        self.started = 0
+        self.stopped = 0
+        self.enforced = 0
+
+    def set_inst_threshold(self, inst_id, threshold):
+        self.thresholds.append((inst_id, threshold))
+
+    def start(self):
+        self.started += 1
+
+    def stop(self):
+        self.stopped += 1
+
+    def enforce(self):
+        self.enforced += 1
+
+
+def _make_bundle(entries, *, failing_inst_ids=(), protection_monitor=None):
     return SimpleNamespace(
         engine=_FakeEngine(failing_inst_ids=failing_inst_ids),
         notifier=_FakeNotifier(),
         perf_tracker=_FakePerfTracker(),
         watchlist_manager=_FakeWatchlistManager(entries),
+        protection_monitor=protection_monitor,
         settings=SimpleNamespace(
+            strategy=SimpleNamespace(
+                default_take_profit_pct=0.06,
+                default_stop_loss_pct=0.03,
+            ),
             runtime=SimpleNamespace(
                 default_max_position=0.25,
             )
@@ -153,6 +178,36 @@ def test_run_runtime_cycle_executes_single_entry() -> None:
     assert call["perf_stats"] == {"trades": 3}
     assert call["daily_stats"] == {"trades": 1}
     assert call["protection_overrides"] == {"take_profit": {"mode": "ratio", "value": 0.03}}
+
+
+def test_run_runtime_cycle_disables_exchange_attached_protection_when_monitor_present() -> None:
+    runtime_execution = _load_runtime_execution()
+    monitor = _FakeProtectionMonitor()
+    bundle = _make_bundle(
+        [
+            {
+                "inst_id": "BTC-USDT-SWAP",
+                "protection": {
+                    "take_profit": {"mode": "ratio", "value": 0.04},
+                    "stop_loss": {"mode": "percent", "value": 0.02},
+                },
+            }
+        ],
+        protection_monitor=monitor,
+    )
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
+
+    assert len(bundle.engine.calls) == 1
+    call = bundle.engine.calls[0]
+    assert call["exchange_protection_enabled"] is False
+    assert monitor.thresholds == [
+        (
+            "BTC-USDT-SWAP",
+            {"take_profit_pct": 0.04, "stop_loss_pct": 0.02},
+        )
+    ]
+    assert monitor.enforced == 1
 
 
 def test_run_runtime_cycle_returns_two_when_all_entries_fail() -> None:

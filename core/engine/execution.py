@@ -266,6 +266,30 @@ class ExecutionEngine:
     def has_live_pending_order(self, inst_id: str) -> bool:
         return self._has_live_pending_order(inst_id, None)
 
+    def has_same_direction_position(self, inst_id: str, action: SignalAction) -> bool:
+        if action not in {SignalAction.BUY, SignalAction.SELL}:
+            return False
+        if not hasattr(self.okx, "get_positions"):
+            return False
+        try:
+            payload = self.okx.get_positions(inst_type="SWAP")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("查询持仓失败，无法判断同向持仓 inst_id={} err={}", inst_id, exc)
+            return False
+        data = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(data, list):
+            return False
+        inst_key = str(inst_id or "").upper()
+        expected_direction = "long" if action == SignalAction.BUY else "short"
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("instId") or "").upper() != inst_key:
+                continue
+            if self._infer_position_direction(entry) == expected_direction:
+                return True
+        return False
+
     def _has_live_pending_order(self, inst_id: str, cl_ord_id: Optional[str]) -> bool:
         if not hasattr(self.okx, "list_pending_orders"):
             return False
@@ -288,6 +312,23 @@ class ExecutionEngine:
                 continue
             return True
         return False
+
+    @staticmethod
+    def _infer_position_direction(entry: Dict[str, Any]) -> Optional[str]:
+        pos_side = str(entry.get("posSide") or "").strip().lower()
+        try:
+            size = float(entry.get("pos") or 0.0)
+        except (TypeError, ValueError):
+            size = 0.0
+        if abs(size) <= 0:
+            return None
+        if pos_side in {"long", "short"}:
+            return pos_side
+        if size > 0:
+            return "long"
+        if size < 0:
+            return "short"
+        return None
 
     def _normalize_order_size(self, size: float, inst_id: str, latest_price: Optional[float]) -> str:
         meta = self._get_instrument_meta(inst_id)

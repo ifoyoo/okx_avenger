@@ -19,6 +19,42 @@ from core.strategy.plugins import format_plugin_snapshot
 from core.utils import NotificationEvent
 
 
+def _normalize_protection_pct(rule: object, fallback: float) -> float:
+    if not isinstance(rule, dict):
+        return max(0.0, float(fallback or 0.0))
+    mode = str(rule.get("mode", "percent") or "percent").strip().lower()
+    if mode in {"ratio", "pct", "percentage"}:
+        mode = "percent"
+    if mode not in {"percent", "disabled", "none", "off"}:
+        return max(0.0, float(fallback or 0.0))
+    if mode in {"disabled", "none", "off"}:
+        return 0.0
+    try:
+        return max(0.0, float(rule.get("value") or 0.0))
+    except (TypeError, ValueError):
+        return max(0.0, float(fallback or 0.0))
+
+
+def _configure_protection_monitor(bundle: RuntimeBundle, entries: list[dict]) -> None:
+    monitor = getattr(bundle, "protection_monitor", None)
+    if monitor is None:
+        return
+    default_tp = float(getattr(bundle.settings.strategy, "default_take_profit_pct", 0.0) or 0.0)
+    default_sl = float(getattr(bundle.settings.strategy, "default_stop_loss_pct", 0.0) or 0.0)
+    for item in entries:
+        inst_id = str(item.get("inst_id") or "").strip().upper()
+        if not inst_id:
+            continue
+        protection = item.get("protection") if isinstance(item.get("protection"), dict) else {}
+        monitor.set_inst_threshold(
+            inst_id,
+            {
+                "take_profit_pct": _normalize_protection_pct(protection.get("take_profit"), default_tp),
+                "stop_loss_pct": _normalize_protection_pct(protection.get("stop_loss"), default_sl),
+            },
+        )
+
+
 def _publish_runtime_error(bundle: RuntimeBundle, *, inst_id: str, timeframe: str, detail: str) -> None:
     notifier = getattr(bundle, "notifier", None)
     if notifier is None:
@@ -223,6 +259,10 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         logger.warning("watchlist 为空，本轮跳过。")
         return 0
 
+    protection_monitor = getattr(bundle, "protection_monitor", None)
+    if protection_monitor is not None and not bool(args.dry_run):
+        _configure_protection_monitor(bundle, entries)
+
     logger.info(f"cycle start total={len(entries)} dry_run={bool(args.dry_run)}")
     completed = 0
     blocked = 0
@@ -251,12 +291,18 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
                 protection_overrides=protection_overrides,
                 perf_stats=perf_stats,
                 daily_stats=daily_stats,
+                exchange_protection_enabled=protection_monitor is None or bool(args.dry_run),
             )
         except Exception as exc:
             logger.error("[{} {}] 执行失败: {}", inst_id, timeframe, exc)
             _publish_runtime_error(bundle, inst_id=inst_id, timeframe=timeframe, detail=str(exc))
             failed += 1
             continue
+        if protection_monitor is not None and not bool(args.dry_run):
+            try:
+                protection_monitor.enforce()
+            except Exception as exc:
+                logger.warning("保护单同步失败 inst={} err={}", inst_id, exc)
 
         signal: TradeSignal = result["signal"]
         plan: Optional[ExecutionPlan] = (result.get("execution") or {}).get("plan")

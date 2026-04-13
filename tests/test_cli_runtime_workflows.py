@@ -24,8 +24,12 @@ def test_runtime_workflows_module_exists() -> None:
 def test_run_runtime_once_writes_running_and_idle_heartbeat(monkeypatch) -> None:
     workflows = _load_workflows()
     writes = []
+    monitor = SimpleNamespace(started=0, stopped=0)
+    monitor.start = lambda: setattr(monitor, "started", monitor.started + 1)
+    monitor.stop = lambda: setattr(monitor, "stopped", monitor.stopped + 1)
     bundle = SimpleNamespace(
         notifier=SimpleNamespace(publish=lambda event: writes.append({"event": event})),
+        protection_monitor=monitor,
         settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json")),
     )
 
@@ -42,6 +46,8 @@ def test_run_runtime_once_writes_running_and_idle_heartbeat(monkeypatch) -> None
     assert writes[2]["status"] == "idle"
     assert writes[2]["exit_code"] == 7
     assert writes[2]["cycle"] == 1
+    assert monitor.started == 1
+    assert monitor.stopped == 1
 
 
 def test_run_runtime_once_notifies_runtime_error(monkeypatch) -> None:
@@ -64,6 +70,79 @@ def test_run_runtime_once_notifies_runtime_error(monkeypatch) -> None:
 
     assert len(bundle.notifier.events) == 1
     assert bundle.notifier.events[0].kind == "runtime_error"
+
+
+def test_sync_protection_orders_configures_watchlist_thresholds_and_enforces(monkeypatch) -> None:
+    workflows = _load_workflows()
+    monitor = SimpleNamespace(thresholds=[], enforced=0)
+    monitor.set_inst_threshold = lambda inst_id, threshold: monitor.thresholds.append((inst_id, threshold))
+    monitor.enforce = lambda: setattr(monitor, "enforced", monitor.enforced + 1)
+    bundle = SimpleNamespace(
+        engine=object(),
+        okx=SimpleNamespace(
+            get_positions=lambda inst_type="SWAP": {"data": [{"instId": "WLFI-USDT-SWAP", "pos": "8"}]},
+            list_algo_orders=lambda ord_type="oco": [{"algoId": "a1", "ordType": ord_type}],
+        ),
+        watchlist_manager=SimpleNamespace(
+            get_watchlist=lambda account_snapshot: [
+                {
+                    "inst_id": "WLFI-USDT-SWAP",
+                    "protection": {
+                        "take_profit": {"mode": "percent", "value": 0.05},
+                        "stop_loss": {"mode": "percent", "value": 0.02},
+                    },
+                }
+            ]
+        ),
+        protection_monitor=monitor,
+        settings=SimpleNamespace(
+            strategy=SimpleNamespace(default_take_profit_pct=0.06, default_stop_loss_pct=0.03),
+        ),
+    )
+    info_calls = []
+
+    class _Logger:
+        def info(self, message, *args):
+            info_calls.append((message, args))
+
+        def warning(self, message, *args):
+            return None
+
+    monkeypatch.setattr(workflows, "_safe_account_snapshot", lambda engine: {"equity": 1000.0})
+    monkeypatch.setattr(workflows, "logger", _Logger())
+
+    result = workflows.sync_protection_orders(bundle)
+
+    assert result == 0
+    assert monitor.thresholds == [
+        ("WLFI-USDT-SWAP", {"take_profit_pct": 0.05, "stop_loss_pct": 0.02})
+    ]
+    assert monitor.enforced == 1
+    assert info_calls[0] == ("protection sync start positions={} algo_total={}", (1, 2))
+    assert info_calls[1] == ("protection sync done positions={} algo_total={}", (1, 2))
+
+
+def test_sync_protection_orders_returns_one_when_monitor_disabled(monkeypatch) -> None:
+    workflows = _load_workflows()
+    bundle = SimpleNamespace(
+        protection_monitor=None,
+        settings=SimpleNamespace(strategy=SimpleNamespace(default_take_profit_pct=0.0, default_stop_loss_pct=0.0)),
+    )
+    warning_calls = []
+
+    class _Logger:
+        def info(self, message, *args):
+            return None
+
+        def warning(self, message, *args):
+            warning_calls.append((message, args))
+
+    monkeypatch.setattr(workflows, "logger", _Logger())
+
+    result = workflows.sync_protection_orders(bundle)
+
+    assert result == 1
+    assert warning_calls == [("保护单同步未启用：当前默认止盈止损均为 0。", ())]
 
 
 def test_show_runtime_status_prints_sections(monkeypatch, capsys) -> None:
