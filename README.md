@@ -79,8 +79,9 @@ OKX_TD_MODE=isolated
 BALANCE_USAGE_RATIO=0.5
 FEATURE_LIMIT=180
 DEFAULT_LEVERAGE=10
-DEFAULT_TAKE_PROFIT_PCT=0.06
-DEFAULT_STOP_LOSS_PCT=0.03
+DEFAULT_TAKE_PROFIT_UPL_RATIO=0.20
+DEFAULT_STOP_LOSS_UPL_RATIO=0.10
+EXECUTION_PENDING_ORDER_TTL_MINUTES=60
 
 NOTIFY_ENABLED=true
 TELEGRAM_BOT_TOKEN=
@@ -95,6 +96,12 @@ LLM_MODEL=gemini-2.5-flash
 LLM_TIMEOUT_SECONDS=15
 LLM_MAX_TOKENS=4096
 ```
+
+`DEFAULT_TAKE_PROFIT_UPL_RATIO` / `DEFAULT_STOP_LOSS_UPL_RATIO` 现在使用 OKX 持仓收益率语义，不是价格涨跌幅。
+- `0.20` 表示持仓收益率到 `+20%` 平仓
+- `0.10` 表示持仓收益率到 `-10%` 平仓
+- 运行时会按当前杠杆换算成交易所触发价
+- 同标的 live 未成交挂单超过 `EXECUTION_PENDING_ORDER_TTL_MINUTES=60` 后会先撤单，但本轮仍阻塞，下一轮再重新评估
 
 ## Watchlist
 
@@ -161,6 +168,7 @@ cd /root/apps/okx_avenger
 - 去掉 `--dry-run` 才会真实下单。
 - 资金太小，系统会因为最小下单量直接拦截。
 - 杠杆要和 OKX 账户真实设置一致。
+- 默认 TP/SL 看的不是价格百分比，而是 OKX `uplRatio`。
 - LLM 只该辅助，不该替你发疯。
 - Watchlist 少一点，归因才清楚。
 
