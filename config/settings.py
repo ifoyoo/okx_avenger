@@ -52,8 +52,8 @@ class AccountSettings(SettingsBase):
 class StrategySettings(SettingsBase):
     balance_usage_ratio: float = Field(0.7, alias="BALANCE_USAGE_RATIO")
     default_leverage: float = Field(1.0, alias="DEFAULT_LEVERAGE")
-    default_take_profit_pct: float = Field(0.35, alias="DEFAULT_TAKE_PROFIT_PCT")
-    default_stop_loss_pct: float = Field(0.2, alias="DEFAULT_STOP_LOSS_PCT")
+    default_take_profit_upl_ratio: float = Field(0.35, alias="DEFAULT_TAKE_PROFIT_UPL_RATIO")
+    default_stop_loss_upl_ratio: float = Field(0.2, alias="DEFAULT_STOP_LOSS_UPL_RATIO")
     risk_daily_loss_limit: float = Field(0.0, alias="RISK_DAILY_LOSS_LIMIT")
     risk_daily_loss_limit_pct: float = Field(0.0, alias="RISK_DAILY_LOSS_LIMIT_PCT")
     risk_consecutive_loss_limit: int = Field(0, alias="RISK_CONSECUTIVE_LOSS_LIMIT")
@@ -70,8 +70,8 @@ class StrategySettings(SettingsBase):
 
     @field_validator(
         "balance_usage_ratio",
-        "default_take_profit_pct",
-        "default_stop_loss_pct",
+        "default_take_profit_upl_ratio",
+        "default_stop_loss_upl_ratio",
         "risk_daily_loss_limit_pct",
         "strategy_arb_strong_conflict_ratio",
         "strategy_arb_hold_confidence_cap",
@@ -115,6 +115,7 @@ class RuntimeSettings(SettingsBase):
     log_dir: str = Field("logs", alias="LOG_DIR")
     data_staleness_seconds: int = Field(180, alias="DATA_STALENESS_SECONDS")
     execution_pending_timeout_seconds: float = Field(0.0, alias="EXECUTION_PENDING_TIMEOUT_SECONDS")
+    execution_pending_order_ttl_minutes: int = Field(0, alias="EXECUTION_PENDING_ORDER_TTL_MINUTES")
     execution_reconcile_position: bool = Field(True, alias="EXECUTION_RECONCILE_POSITION")
     config_snapshot_path: str = Field("data/config_snapshot.json", alias="CONFIG_SNAPSHOT_PATH")
     runtime_heartbeat_path: str = Field("data/runtime_heartbeat.json", alias="RUNTIME_HEARTBEAT_PATH")

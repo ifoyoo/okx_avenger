@@ -15,8 +15,8 @@ from core.client import OKXClient
 
 @dataclass
 class ProtectionThresholds:
-    take_profit_pct: float
-    stop_loss_pct: float
+    take_profit_upl_ratio: float
+    stop_loss_upl_ratio: float
 
 
 class ProtectionMonitor:
@@ -120,7 +120,7 @@ class ProtectionMonitor:
             if now - self._cooldown.get(key, 0.0) < self.cooldown_seconds:
                 return
             margin_mode = entry.get("mgnMode") or entry.get("marginMode")
-            if thresholds.take_profit_pct > 0 and profit_ratio >= thresholds.take_profit_pct:
+            if thresholds.take_profit_upl_ratio > 0 and profit_ratio >= thresholds.take_profit_upl_ratio:
                 self._close_position(
                     inst_id,
                     pos_side_raw,
@@ -131,7 +131,7 @@ class ProtectionMonitor:
                     profit_ratio,
                 )
                 self._cooldown[key] = now
-            elif thresholds.stop_loss_pct > 0 and profit_ratio <= -thresholds.stop_loss_pct:
+            elif thresholds.stop_loss_upl_ratio > 0 and profit_ratio <= -thresholds.stop_loss_upl_ratio:
                 self._close_position(
                     inst_id,
                     pos_side_raw,
@@ -155,14 +155,14 @@ class ProtectionMonitor:
     def _normalize_threshold(node: ProtectionThresholds | Dict[str, Any]) -> Optional[ProtectionThresholds]:
         if isinstance(node, ProtectionThresholds):
             return ProtectionThresholds(
-                take_profit_pct=max(0.0, float(node.take_profit_pct or 0.0)),
-                stop_loss_pct=max(0.0, float(node.stop_loss_pct or 0.0)),
+                take_profit_upl_ratio=max(0.0, float(node.take_profit_upl_ratio or 0.0)),
+                stop_loss_upl_ratio=max(0.0, float(node.stop_loss_upl_ratio or 0.0)),
             )
         if not isinstance(node, dict):
             return None
-        tp = max(0.0, float(node.get("take_profit_pct") or 0.0))
-        sl = max(0.0, float(node.get("stop_loss_pct") or 0.0))
-        return ProtectionThresholds(take_profit_pct=tp, stop_loss_pct=sl)
+        tp = max(0.0, float(node.get("take_profit_upl_ratio", node.get("take_profit_pct")) or 0.0))
+        sl = max(0.0, float(node.get("stop_loss_upl_ratio", node.get("stop_loss_pct")) or 0.0))
+        return ProtectionThresholds(take_profit_upl_ratio=tp, stop_loss_upl_ratio=sl)
 
     @staticmethod
     def _infer_direction(pos_side_raw: str, raw_size: float) -> Optional[str]:

@@ -115,8 +115,8 @@ def _make_bundle(entries, *, failing_inst_ids=(), protection_monitor=None):
         protection_monitor=protection_monitor,
         settings=SimpleNamespace(
             strategy=SimpleNamespace(
-                default_take_profit_pct=0.06,
-                default_stop_loss_pct=0.03,
+                default_take_profit_upl_ratio=0.06,
+                default_stop_loss_upl_ratio=0.03,
             ),
             runtime=SimpleNamespace(
                 default_max_position=0.25,
@@ -204,7 +204,7 @@ def test_run_runtime_cycle_disables_exchange_attached_protection_when_monitor_pr
     assert monitor.thresholds == [
         (
             "BTC-USDT-SWAP",
-            {"take_profit_pct": 0.04, "stop_loss_pct": 0.02},
+            {"take_profit_upl_ratio": 0.04, "stop_loss_upl_ratio": 0.02},
         )
     ]
     assert monitor.enforced == 1

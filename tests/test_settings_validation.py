@@ -26,6 +26,16 @@ def test_strategy_settings_reject_invalid_ratio() -> None:
         StrategySettings(BALANCE_USAGE_RATIO=1.2)
 
 
+def test_strategy_settings_expose_upl_ratio_defaults() -> None:
+    settings = StrategySettings(
+        DEFAULT_TAKE_PROFIT_UPL_RATIO=0.34,
+        DEFAULT_STOP_LOSS_UPL_RATIO=0.18,
+    )
+
+    assert settings.default_take_profit_upl_ratio == 0.34
+    assert settings.default_stop_loss_upl_ratio == 0.18
+
+
 def test_intel_settings_reject_invalid_threshold_order() -> None:
     with pytest.raises(ValidationError):
         IntelSettings(
@@ -35,11 +45,12 @@ def test_intel_settings_reject_invalid_threshold_order() -> None:
 
 
 def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
-    runtime = RuntimeSettings()
+    runtime = RuntimeSettings(EXECUTION_PENDING_ORDER_TTL_MINUTES=30)
 
     assert not hasattr(runtime, "app_version")
     assert not hasattr(runtime, "app_author")
     assert not hasattr(runtime, "protection_monitor_interval_seconds")
+    assert runtime.execution_pending_order_ttl_minutes == 30
 
 
 def test_notification_settings_normalize_level() -> None:

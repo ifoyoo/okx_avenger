@@ -96,7 +96,7 @@ def test_sync_protection_orders_configures_watchlist_thresholds_and_enforces(mon
         ),
         protection_monitor=monitor,
         settings=SimpleNamespace(
-            strategy=SimpleNamespace(default_take_profit_pct=0.06, default_stop_loss_pct=0.03),
+            strategy=SimpleNamespace(default_take_profit_upl_ratio=0.06, default_stop_loss_upl_ratio=0.03),
         ),
     )
     info_calls = []
@@ -115,7 +115,7 @@ def test_sync_protection_orders_configures_watchlist_thresholds_and_enforces(mon
 
     assert result == 0
     assert monitor.thresholds == [
-        ("WLFI-USDT-SWAP", {"take_profit_pct": 0.05, "stop_loss_pct": 0.02})
+        ("WLFI-USDT-SWAP", {"take_profit_upl_ratio": 0.05, "stop_loss_upl_ratio": 0.02})
     ]
     assert monitor.enforced == 1
     assert info_calls[0] == ("protection sync start positions={} algo_total={}", (1, 2))
@@ -126,7 +126,7 @@ def test_sync_protection_orders_returns_one_when_monitor_disabled(monkeypatch) -
     workflows = _load_workflows()
     bundle = SimpleNamespace(
         protection_monitor=None,
-        settings=SimpleNamespace(strategy=SimpleNamespace(default_take_profit_pct=0.0, default_stop_loss_pct=0.0)),
+        settings=SimpleNamespace(strategy=SimpleNamespace(default_take_profit_upl_ratio=0.0, default_stop_loss_upl_ratio=0.0)),
     )
     warning_calls = []
 

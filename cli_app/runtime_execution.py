@@ -39,8 +39,8 @@ def _configure_protection_monitor(bundle: RuntimeBundle, entries: list[dict]) ->
     monitor = getattr(bundle, "protection_monitor", None)
     if monitor is None:
         return
-    default_tp = float(getattr(bundle.settings.strategy, "default_take_profit_pct", 0.0) or 0.0)
-    default_sl = float(getattr(bundle.settings.strategy, "default_stop_loss_pct", 0.0) or 0.0)
+    default_tp = float(getattr(bundle.settings.strategy, "default_take_profit_upl_ratio", 0.0) or 0.0)
+    default_sl = float(getattr(bundle.settings.strategy, "default_stop_loss_upl_ratio", 0.0) or 0.0)
     for item in entries:
         inst_id = str(item.get("inst_id") or "").strip().upper()
         if not inst_id:
@@ -49,8 +49,8 @@ def _configure_protection_monitor(bundle: RuntimeBundle, entries: list[dict]) ->
         monitor.set_inst_threshold(
             inst_id,
             {
-                "take_profit_pct": _normalize_protection_pct(protection.get("take_profit"), default_tp),
-                "stop_loss_pct": _normalize_protection_pct(protection.get("stop_loss"), default_sl),
+                "take_profit_upl_ratio": _normalize_protection_pct(protection.get("take_profit"), default_tp),
+                "stop_loss_upl_ratio": _normalize_protection_pct(protection.get("stop_loss"), default_sl),
             },
         )
 

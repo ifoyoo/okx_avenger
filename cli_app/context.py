@@ -67,15 +67,15 @@ def build_runtime() -> RuntimeBundle:
     engine = TradingEngine(okx, analyzer, strategy, settings, market_stream=None)
     watchlist_manager = WatchlistManager(okx, settings)
     perf_tracker = PerformanceTracker(okx)
-    default_tp = max(0.0, float(settings.strategy.default_take_profit_pct or 0.0))
-    default_sl = max(0.0, float(settings.strategy.default_stop_loss_pct or 0.0))
+    default_tp = max(0.0, float(settings.strategy.default_take_profit_upl_ratio or 0.0))
+    default_sl = max(0.0, float(settings.strategy.default_stop_loss_upl_ratio or 0.0))
     protection_monitor = None
     if default_tp > 0 or default_sl > 0:
         protection_monitor = ProtectionOrderManager(
             okx_client=okx,
             thresholds=ProtectionThresholds(
-                take_profit_pct=default_tp,
-                stop_loss_pct=default_sl,
+                take_profit_upl_ratio=default_tp,
+                stop_loss_upl_ratio=default_sl,
             ),
             default_td_mode=settings.account.okx_td_mode or "cross",
         )
