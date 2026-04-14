@@ -86,6 +86,7 @@ class TradingEngine:
         self.settings = settings
         self.account_settings = settings.account
         self.strategy_settings = settings.strategy
+        self.runtime_settings = getattr(settings, "runtime", None)
         self.balance_usage_ratio = self.strategy_settings.balance_usage_ratio
         leverage = getattr(self.strategy_settings, "default_leverage", 1.0)
         try:
@@ -116,7 +117,7 @@ class TradingEngine:
             getattr(self.strategy_settings, "risk_state_path", "data/risk_circuit_state.json")
             or "data/risk_circuit_state.json"
         )
-        runtime_settings = getattr(settings, "runtime", None)
+        runtime_settings = self.runtime_settings
         try:
             data_staleness_seconds = int(getattr(runtime_settings, "data_staleness_seconds", 180) or 180)
         except (TypeError, ValueError):
@@ -542,14 +543,16 @@ class TradingEngine:
         if (
             not execution_plan.blocked
             and signal.action in {SignalAction.BUY, SignalAction.SELL}
-            and self.execution_engine.has_live_pending_order(inst_id)
         ):
-            pending_reason = f"存在未成交委托：{inst_id} 当前仍有 live pending 单，跳过重复下单。"
-            execution_plan.blocked = True
-            execution_plan.block_reason = pending_reason
-            execution_plan.protection = None
-            execution_plan.notes = tuple(execution_plan.notes) + (pending_reason,)
-            exec_logger.warning("event=pending_order_blocked reason={reason}", reason=pending_reason)
+            pending_reason = self._maybe_cancel_stale_pending_order(inst_id)
+            if pending_reason is None and self.execution_engine.has_live_pending_order(inst_id):
+                pending_reason = f"存在未成交委托：{inst_id} 当前仍有 live pending 单，跳过重复下单。"
+            if pending_reason:
+                execution_plan.blocked = True
+                execution_plan.block_reason = pending_reason
+                execution_plan.protection = None
+                execution_plan.notes = tuple(execution_plan.notes) + (pending_reason,)
+                exec_logger.warning("event=pending_order_blocked reason={reason}", reason=pending_reason)
         if (
             not execution_plan.blocked
             and signal.action in {SignalAction.BUY, SignalAction.SELL}
@@ -590,6 +593,73 @@ class TradingEngine:
             dry_run=dry_run,
         )
         return execution_bundle
+
+    def _maybe_cancel_stale_pending_order(self, inst_id: str) -> Optional[str]:
+        ttl_minutes = max(
+            0,
+            int(getattr(self.runtime_settings, "execution_pending_order_ttl_minutes", 0) or 0),
+        )
+        if ttl_minutes <= 0:
+            return None
+        for entry in self.execution_engine.list_live_pending_orders(inst_id):
+            if str(entry.get("state") or "").strip().lower() != "live":
+                continue
+            if self._is_reduce_only_pending_order(entry):
+                continue
+            try:
+                acc_fill = float(entry.get("accFillSz") or 0.0)
+            except (TypeError, ValueError):
+                acc_fill = 0.0
+            if acc_fill > 0:
+                continue
+            if not self.execution_engine.is_pending_order_stale(entry, ttl_minutes=ttl_minutes):
+                continue
+            ord_id = entry.get("ordId")
+            cl_ord_id = entry.get("clOrdId")
+            try:
+                response = self.okx.cancel_order(
+                    inst_id=inst_id,
+                    ord_id=ord_id,
+                    cl_ord_id=cl_ord_id,
+                )
+            except Exception as exc:  # pragma: no cover
+                logger.warning(
+                    "event=stale_pending_cancel_failed inst_id={} ord_id={} cl_ord_id={} err={}",
+                    inst_id,
+                    ord_id,
+                    cl_ord_id,
+                    exc,
+                )
+                return f"存在未成交委托：{inst_id} 超时挂单撤单失败，当前轮跳过。"
+            if self._cancel_order_failed(response):
+                logger.warning(
+                    "event=stale_pending_cancel_failed inst_id={} ord_id={} cl_ord_id={} response={}",
+                    inst_id,
+                    ord_id,
+                    cl_ord_id,
+                    response,
+                )
+                return f"存在未成交委托：{inst_id} 超时挂单撤单失败，当前轮跳过。"
+            return f"存在未成交委托：{inst_id} 已撤销超时挂单，下一轮再评估。"
+        return None
+
+    @staticmethod
+    def _is_reduce_only_pending_order(entry: Dict[str, Any]) -> bool:
+        value = str(entry.get("reduceOnly") or "").strip().lower()
+        return value in {"true", "1", "yes"}
+
+    @staticmethod
+    def _cancel_order_failed(response: Any) -> bool:
+        if not isinstance(response, dict):
+            return True
+        if response.get("error"):
+            return True
+        for item in response.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("sCode") or "0") not in {"", "0"}:
+                return True
+        return False
 
     def _check_data_freshness(
         self,

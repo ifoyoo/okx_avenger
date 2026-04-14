@@ -360,7 +360,40 @@ class ExecutionEngine:
         return False
 
     def has_live_pending_order(self, inst_id: str) -> bool:
-        return self._has_live_pending_order(inst_id, None)
+        return bool(self.list_live_pending_orders(inst_id))
+
+    def list_live_pending_orders(self, inst_id: str) -> List[Dict[str, Any]]:
+        if not hasattr(self.okx, "list_pending_orders"):
+            return []
+        try:
+            entries = self.okx.list_pending_orders(inst_id)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("查询未成交委托失败 inst_id={} err={}", inst_id, exc)
+            return []
+        inst_key = str(inst_id or "").upper()
+        live_entries: List[Dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("instId") or "").upper() != inst_key:
+                continue
+            state = str(entry.get("state") or "").strip().lower()
+            if state and state not in {"live", "partially_filled"}:
+                continue
+            live_entries.append(entry)
+        return live_entries
+
+    def is_pending_order_stale(self, entry: Dict[str, Any], *, ttl_minutes: int) -> bool:
+        if ttl_minutes <= 0:
+            return False
+        try:
+            created_ms = int(float(entry.get("cTime") or 0))
+        except (TypeError, ValueError):
+            created_ms = 0
+        if created_ms <= 0:
+            return False
+        age_ms = time.time() * 1000 - created_ms
+        return age_ms >= ttl_minutes * 60 * 1000
 
     def has_same_direction_position(self, inst_id: str, action: SignalAction) -> bool:
         if action not in {SignalAction.BUY, SignalAction.SELL}:

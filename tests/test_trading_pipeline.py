@@ -661,6 +661,141 @@ def test_execution_step_blocks_when_live_pending_order_exists(monkeypatch) -> No
     assert "未成交委托" in (bundle.plan.block_reason or "")
 
 
+def test_execution_step_cancels_stale_pending_order_and_blocks_current_cycle(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.runtime_settings.execution_pending_order_ttl_minutes = 60
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="limit",
+        size=0.01,
+        price=99.5,
+        est_slippage=0.001,
+    )
+    stale_entry = {
+        "instId": "BTC-USDT-SWAP",
+        "ordId": "stale-ord-1",
+        "clOrdId": "stale-cl-1",
+        "state": "live",
+        "ordType": "limit",
+        "accFillSz": "0",
+        "reduceOnly": "false",
+        "cTime": "1710000000000",
+    }
+    cancelled = []
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(engine.execution_engine, "list_live_pending_orders", lambda inst_id: [stale_entry])
+    monkeypatch.setattr(
+        engine.execution_engine,
+        "is_pending_order_stale",
+        lambda entry, ttl_minutes: ttl_minutes == 60,
+    )
+    monkeypatch.setattr(engine.execution_engine, "has_live_pending_order", lambda inst_id: False)
+
+    okx = SimpleNamespace(
+        cancel_order=lambda **kwargs: cancelled.append(kwargs) or {"code": "0", "data": [{"sCode": "0", "sMsg": ""}]}
+    )
+    engine.okx = okx
+    engine.execution_engine.okx = okx
+
+    def _should_not_execute(_plan):
+        raise AssertionError("stale pending cancel should block the current cycle")
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _should_not_execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+    )
+
+    assert cancelled == [
+        {
+            "inst_id": "BTC-USDT-SWAP",
+            "ord_id": "stale-ord-1",
+            "cl_ord_id": "stale-cl-1",
+        }
+    ]
+    assert bundle.plan.blocked is True
+    assert bundle.report is None
+    assert bundle.plan.block_reason == "存在未成交委托：BTC-USDT-SWAP 已撤销超时挂单，下一轮再评估。"
+
+
+def test_execution_step_blocks_when_stale_pending_cancel_fails(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.runtime_settings.execution_pending_order_ttl_minutes = 60
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="limit",
+        size=0.01,
+        price=99.5,
+        est_slippage=0.001,
+    )
+    stale_entry = {
+        "instId": "BTC-USDT-SWAP",
+        "ordId": "stale-ord-1",
+        "clOrdId": "stale-cl-1",
+        "state": "live",
+        "ordType": "limit",
+        "accFillSz": "0",
+        "reduceOnly": "false",
+        "cTime": "1710000000000",
+    }
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(engine.execution_engine, "list_live_pending_orders", lambda inst_id: [stale_entry])
+    monkeypatch.setattr(
+        engine.execution_engine,
+        "is_pending_order_stale",
+        lambda entry, ttl_minutes: ttl_minutes == 60,
+    )
+    monkeypatch.setattr(engine.execution_engine, "has_live_pending_order", lambda inst_id: False)
+
+    okx = SimpleNamespace(
+        cancel_order=lambda **kwargs: {
+            "error": {"code": "54000", "message": "cancel failed"},
+            "data": [{"sCode": "54000", "sMsg": "reject"}],
+        }
+    )
+    engine.okx = okx
+    engine.execution_engine.okx = okx
+
+    def _should_not_execute(_plan):
+        raise AssertionError("failed stale pending cancel should still block the current cycle")
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _should_not_execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+    )
+
+    assert bundle.plan.blocked is True
+    assert bundle.report is None
+    assert bundle.plan.block_reason == "存在未成交委托：BTC-USDT-SWAP 超时挂单撤单失败，当前轮跳过。"
+
+
 def test_execution_step_blocks_when_same_direction_position_exists(monkeypatch) -> None:
     engine = _build_engine()
     fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
