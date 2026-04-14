@@ -86,6 +86,7 @@ class ExecutionEngine:
         pos_side: Optional[str],
         latest_price: float,
         atr: float,
+        leverage: float = 1.0,
         trace_id: Optional[str] = None,
     ) -> ExecutionPlan:
         notes = []
@@ -136,6 +137,12 @@ class ExecutionEngine:
                 entry_price=entry_reference,
                 atr=atr,
             )
+            resolved_protection = self._resolve_upl_ratio_protection(
+                protection=resolved_protection,
+                action=signal.action,
+                entry_price=entry_reference,
+                leverage=leverage,
+            )
         if resolved_protection and not blocked:
             notes.append("附带止盈/止损保护。")
         if min_contract_note and not blocked:
@@ -163,6 +170,95 @@ class ExecutionEngine:
             latest_price=latest_price,
             cl_ord_id=cl_ord_id,
         )
+
+    def _resolve_upl_ratio_protection(
+        self,
+        *,
+        protection: Optional[ResolvedTradeProtection],
+        action: SignalAction,
+        entry_price: float,
+        leverage: float,
+    ) -> Optional[ResolvedTradeProtection]:
+        if not protection:
+            return None
+        take_profit = self._resolve_upl_ratio_target(
+            target=protection.take_profit,
+            action=action,
+            entry_price=entry_price,
+            leverage=leverage,
+            target_kind="tp",
+        )
+        stop_loss = self._resolve_upl_ratio_target(
+            target=protection.stop_loss,
+            action=action,
+            entry_price=entry_price,
+            leverage=leverage,
+            target_kind="sl",
+        )
+        if not take_profit and not stop_loss:
+            return None
+        return ResolvedTradeProtection(take_profit=take_profit, stop_loss=stop_loss)
+
+    def _resolve_upl_ratio_target(
+        self,
+        *,
+        target: Optional[ProtectionTarget],
+        action: SignalAction,
+        entry_price: float,
+        leverage: float,
+        target_kind: str,
+    ) -> Optional[ProtectionTarget]:
+        if target is None or (target.mode or "").lower() != "percent":
+            return target
+        try:
+            upl_ratio = abs(float(target.trigger_ratio or 0.0))
+        except (TypeError, ValueError):
+            upl_ratio = 0.0
+        trigger_px = self._upl_ratio_to_trigger_px(
+            entry_price=entry_price,
+            leverage=leverage,
+            action=action,
+            target_kind=target_kind,
+            upl_ratio=upl_ratio,
+        )
+        if trigger_px is None:
+            return None
+        return ProtectionTarget(
+            trigger_ratio=None,
+            trigger_px=trigger_px,
+            order_px=trigger_px if (target.order_type or "market").lower() == "limit" else None,
+            trigger_type=target.trigger_type or "last",
+            order_type=target.order_type or "market",
+            order_kind=target.order_kind or "condition",
+            mode=target.mode,
+        )
+
+    def _upl_ratio_to_trigger_px(
+        self,
+        *,
+        entry_price: float,
+        leverage: float,
+        action: SignalAction,
+        target_kind: str,
+        upl_ratio: float,
+    ) -> Optional[float]:
+        if entry_price <= 0:
+            return None
+        try:
+            lev = max(1.0, float(leverage or 1.0))
+        except (TypeError, ValueError):
+            lev = 1.0
+        move_ratio = abs(float(upl_ratio or 0.0)) / lev
+        if move_ratio <= 0:
+            return None
+        if target_kind == "tp":
+            direction = 1 if action == SignalAction.BUY else -1
+        else:
+            direction = -1 if action == SignalAction.BUY else 1
+        trigger_px = entry_price * (1 + direction * move_ratio)
+        if trigger_px <= 0:
+            return None
+        return trigger_px
 
     def execute(self, plan: ExecutionPlan) -> ExecutionReport:
         if plan.blocked or plan.size <= 0:

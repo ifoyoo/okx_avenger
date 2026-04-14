@@ -227,6 +227,7 @@ class ProtectionOrderManager:
         direction = self._position_direction(pos_side, raw_pos)
         if direction is None:
             return None
+        leverage = self._resolve_leverage(entry)
         side = "sell" if direction == "long" else "buy"
         td_mode = str(entry.get("mgnMode") or entry.get("marginMode") or self.default_td_mode).strip().lower()
         if td_mode not in {"cross", "isolated", "cash"}:
@@ -235,18 +236,12 @@ class ProtectionOrderManager:
         tp_trigger_px = None
         sl_trigger_px = None
         if thresholds.take_profit_upl_ratio > 0:
-            factor = (
-                1 + thresholds.take_profit_upl_ratio
-                if direction == "long"
-                else 1 - thresholds.take_profit_upl_ratio
-            )
+            move = thresholds.take_profit_upl_ratio / leverage
+            factor = 1 + move if direction == "long" else 1 - move
             tp_trigger_px = self._format_price(avg_px * factor)
         if thresholds.stop_loss_upl_ratio > 0:
-            factor = (
-                1 - thresholds.stop_loss_upl_ratio
-                if direction == "long"
-                else 1 + thresholds.stop_loss_upl_ratio
-            )
+            move = thresholds.stop_loss_upl_ratio / leverage
+            factor = 1 - move if direction == "long" else 1 + move
             sl_trigger_px = self._format_price(avg_px * factor)
         if not tp_trigger_px and not sl_trigger_px:
             return None
@@ -363,6 +358,18 @@ class ProtectionOrderManager:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _resolve_leverage(self, entry: Dict[str, Any]) -> float:
+        leverage = entry.get("lever")
+        try:
+            return max(1.0, float(leverage or 1.0))
+        except (TypeError, ValueError):
+            logger.warning(
+                "保护单同步杠杆解析失败 inst={} lever={}",
+                entry.get("instId"),
+                leverage,
+            )
+            return 1.0
 
     @staticmethod
     def _normalize_decimal(value: object) -> str:

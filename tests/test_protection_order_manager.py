@@ -214,3 +214,27 @@ def test_enforce_places_conditional_order_when_only_stop_loss_is_enabled() -> No
             "reduce_only": True,
         }
     ]
+
+
+def test_enforce_places_single_oco_from_live_position_leverage() -> None:
+    client = _DummyOKX(
+        positions=[
+            {
+                "instId": "PUMP-USDT-SWAP",
+                "posSide": "net",
+                "pos": "1",
+                "avgPx": "0.001917",
+                "lever": "10",
+                "mgnMode": "isolated",
+            }
+        ]
+    )
+    manager = ProtectionOrderManager(
+        okx_client=client,
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.20, stop_loss_upl_ratio=0.10),
+    )
+
+    manager.enforce()
+
+    assert client.placed[0]["tp_trigger_px"] == "0.00195534"
+    assert client.placed[0]["sl_trigger_px"] == "0.00189783"

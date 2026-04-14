@@ -192,7 +192,47 @@ def test_build_plan_resolves_attach_algo_orders_from_trade_protection() -> None:
             "tpTriggerPxType": "last",
             "tpOrdPx": "-1",
             "tpOrdKind": "condition",
-            "slTriggerRatio": "-0.01",
+            "slTriggerPx": "99",
+            "slTriggerPxType": "last",
+            "slOrdPx": "-1",
+            "slOrdKind": "condition",
+        }
+    ]
+
+
+def test_build_plan_resolves_attach_algo_orders_from_upl_ratio_protection() -> None:
+    client = _DummyOKXClient()
+    engine = ExecutionEngine(client)
+    signal = TradeSignal(
+        action=SignalAction.BUY,
+        confidence=0.7,
+        reason="x",
+        size=0.01,
+        protection=TradeProtection(
+            take_profit=ProtectionRule(mode="percent", value=0.20),
+            stop_loss=ProtectionRule(mode="percent", value=0.10),
+        ),
+    )
+
+    plan = engine.build_plan(
+        inst_id="BTC-USDT-SWAP",
+        signal=signal,
+        td_mode="cross",
+        pos_side="long",
+        latest_price=100.0,
+        atr=0.0,
+        leverage=10.0,
+        trace_id="uplratio",
+    )
+    payload = engine._build_attach_algo_orders(plan.protection)
+
+    assert payload == [
+        {
+            "tpTriggerPx": "102",
+            "tpTriggerPxType": "last",
+            "tpOrdPx": "-1",
+            "tpOrdKind": "condition",
+            "slTriggerPx": "99",
             "slTriggerPxType": "last",
             "slOrdPx": "-1",
             "slOrdKind": "condition",

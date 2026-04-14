@@ -525,6 +525,7 @@ class TradingEngine:
             pos_side=pos_side,
             latest_price=float(latest_row.get("close", 0.0) or 0.0),
             atr=float(latest_row.get("atr", 0.0) or 0.0),
+            leverage=self.leverage,
             trace_id=trace_id,
         )
         is_stale, stale_reason = self._check_data_freshness(

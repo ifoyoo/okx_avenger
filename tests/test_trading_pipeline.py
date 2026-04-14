@@ -545,6 +545,44 @@ def test_execution_step_blocks_when_data_stale(monkeypatch) -> None:
     assert "数据新鲜度闸门" in (bundle.plan.block_reason or "")
 
 
+def test_execution_step_passes_runtime_leverage_to_execution_engine(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.leverage = 7.0
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="market",
+        size=0.01,
+        price=None,
+        est_slippage=0.0,
+    )
+    captured: dict[str, object] = {}
+
+    def _build_plan(**kwargs):
+        captured.update(kwargs)
+        return built_plan
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", _build_plan)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=True,
+        signal=signal,
+        features=features,
+    )
+
+    assert bundle.plan is built_plan
+    assert captured["leverage"] == 7.0
+
+
 def test_execution_step_allows_fresh_data(monkeypatch) -> None:
     engine = _build_engine()
     fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
