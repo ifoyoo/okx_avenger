@@ -177,7 +177,13 @@ class ProtectionOrderManager:
             payload["size"] = desired.size
         if desired.close_fraction:
             payload["close_fraction"] = desired.close_fraction
-        self.okx.place_algo_order(**payload)
+        response = self.okx.place_algo_order(**payload)
+        self._assert_algo_success(
+            operation="place",
+            inst_id=desired.inst_id,
+            payload=payload,
+            response=response,
+        )
 
     def _amend_order(self, current: Dict[str, Any], desired: DesiredOcoOrder) -> None:
         algo_id = str(current.get("algoId") or "").strip()
@@ -206,7 +212,69 @@ class ProtectionOrderManager:
             payload["new_sl_trigger_px"] = desired.sl_trigger_px
             payload["new_sl_order_px"] = desired.sl_order_px
             payload["new_sl_trigger_px_type"] = desired.sl_trigger_px_type
-        self.okx.amend_algo_order(**payload)
+        response = self.okx.amend_algo_order(**payload)
+        self._assert_algo_success(
+            operation="amend",
+            inst_id=desired.inst_id,
+            payload=payload,
+            response=response,
+        )
+
+    def _assert_algo_success(
+        self,
+        *,
+        operation: str,
+        inst_id: str,
+        payload: Dict[str, Any],
+        response: Any,
+    ) -> bool:
+        if not isinstance(response, dict):
+            logger.error(
+                "event=protection_order_sync_failed inst_id={} operation={} code={} msg={} payload={}",
+                inst_id,
+                operation,
+                "INVALID_RESPONSE",
+                "non-dict response",
+                payload,
+            )
+            return False
+        error = response.get("error")
+        if isinstance(error, dict):
+            logger.error(
+                "event=protection_order_sync_failed inst_id={} operation={} code={} msg={} payload={}",
+                inst_id,
+                operation,
+                error.get("code") or "",
+                error.get("message") or "",
+                payload,
+            )
+            return False
+        for item in response.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            s_code = str(item.get("sCode") or "0")
+            if s_code not in {"", "0"}:
+                logger.error(
+                    "event=protection_order_sync_failed inst_id={} operation={} code={} msg={} payload={}",
+                    inst_id,
+                    operation,
+                    s_code,
+                    item.get("sMsg") or "",
+                    payload,
+                )
+                return False
+            fail_code = str(item.get("failCode") or "")
+            if fail_code not in {"", "0"}:
+                logger.error(
+                    "event=protection_order_sync_failed inst_id={} operation={} code={} msg={} payload={}",
+                    inst_id,
+                    operation,
+                    fail_code,
+                    item.get("failMsg") or item.get("sMsg") or "",
+                    payload,
+                )
+                return False
+        return True
 
     def _build_desired_order(self, entry: Dict[str, Any]) -> Optional[DesiredOcoOrder]:
         if not isinstance(entry, dict):

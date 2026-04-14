@@ -238,3 +238,99 @@ def test_enforce_places_single_oco_from_live_position_leverage() -> None:
 
     assert client.placed[0]["tp_trigger_px"] == "0.00195534"
     assert client.placed[0]["sl_trigger_px"] == "0.00189783"
+
+
+def test_enforce_logs_failed_place_algo_order(monkeypatch) -> None:
+    client = _DummyOKX(
+        positions=[
+            {
+                "instId": "DOGE-USDT-SWAP",
+                "posSide": "net",
+                "pos": "0.01",
+                "avgPx": "0.09333",
+                "lever": "3",
+                "mgnMode": "isolated",
+            }
+        ]
+    )
+    client.place_algo_order = lambda **payload: {
+        "error": {"code": "54000", "message": "place failed", "data": [{"sCode": "54000", "sMsg": "reject"}]}
+    }
+    errors = []
+
+    class _Logger:
+        def info(self, *args, **kwargs):
+            return None
+
+        def error(self, message, *args):
+            errors.append((message, args))
+
+        def warning(self, message, *args):
+            errors.append((message, args))
+
+    monkeypatch.setattr("core.engine.protection_orders.logger", _Logger())
+
+    manager = ProtectionOrderManager(
+        okx_client=client,
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.20, stop_loss_upl_ratio=0.10),
+    )
+
+    manager.enforce()
+
+    assert any("event=protection_order_sync_failed" in msg for msg, _ in errors)
+
+
+def test_enforce_logs_failed_amend_algo_order(monkeypatch) -> None:
+    client = _DummyOKX(
+        positions=[
+            {
+                "instId": "DOGE-USDT-SWAP",
+                "posSide": "net",
+                "pos": "-0.01",
+                "avgPx": "0.09074",
+                "lever": "5",
+                "mgnMode": "isolated",
+            }
+        ],
+        algo_orders=[
+            {
+                "instId": "DOGE-USDT-SWAP",
+                "algoId": "doge-oco",
+                "ordType": "oco",
+                "state": "live",
+                "side": "buy",
+                "posSide": "net",
+                "tpTriggerPx": "0.0852",
+                "slTriggerPx": "0.0934",
+                "tpOrdPx": "-1",
+                "slOrdPx": "-1",
+                "closeFraction": "1",
+            }
+        ],
+    )
+    client.amend_algo_order = lambda **payload: {
+        "code": "0",
+        "data": [{"algoId": payload.get("algoId", ""), "sCode": "54001", "sMsg": "amend reject"}],
+    }
+    errors = []
+
+    class _Logger:
+        def info(self, *args, **kwargs):
+            return None
+
+        def error(self, message, *args):
+            errors.append((message, args))
+
+        def warning(self, message, *args):
+            errors.append((message, args))
+
+    monkeypatch.setattr("core.engine.protection_orders.logger", _Logger())
+
+    manager = ProtectionOrderManager(
+        okx_client=client,
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.20, stop_loss_upl_ratio=0.10),
+    )
+
+    manager.enforce()
+
+    assert any("event=protection_order_sync_failed" in msg for msg, _ in errors)
