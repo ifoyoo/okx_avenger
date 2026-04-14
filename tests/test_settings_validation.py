@@ -26,6 +26,11 @@ def test_strategy_settings_reject_invalid_ratio() -> None:
         StrategySettings(BALANCE_USAGE_RATIO=1.2)
 
 
+def test_strategy_settings_reject_invalid_upl_ratio() -> None:
+    with pytest.raises(ValidationError):
+        StrategySettings(DEFAULT_TAKE_PROFIT_UPL_RATIO=1.2)
+
+
 def test_strategy_settings_expose_upl_ratio_defaults() -> None:
     defaults = StrategySettings()
     assert defaults.default_take_profit_upl_ratio == 0.2

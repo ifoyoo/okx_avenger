@@ -222,7 +222,7 @@ class ProtectionOrderManager:
         if avg_px is None or avg_px <= 0:
             return None
         thresholds = self._resolve_threshold(inst_id)
-        if thresholds.take_profit_pct <= 0 and thresholds.stop_loss_pct <= 0:
+        if thresholds.take_profit_upl_ratio <= 0 and thresholds.stop_loss_upl_ratio <= 0:
             return None
         direction = self._position_direction(pos_side, raw_pos)
         if direction is None:
@@ -234,11 +234,19 @@ class ProtectionOrderManager:
 
         tp_trigger_px = None
         sl_trigger_px = None
-        if thresholds.take_profit_pct > 0:
-            factor = 1 + thresholds.take_profit_pct if direction == "long" else 1 - thresholds.take_profit_pct
+        if thresholds.take_profit_upl_ratio > 0:
+            factor = (
+                1 + thresholds.take_profit_upl_ratio
+                if direction == "long"
+                else 1 - thresholds.take_profit_upl_ratio
+            )
             tp_trigger_px = self._format_price(avg_px * factor)
-        if thresholds.stop_loss_pct > 0:
-            factor = 1 - thresholds.stop_loss_pct if direction == "long" else 1 + thresholds.stop_loss_pct
+        if thresholds.stop_loss_upl_ratio > 0:
+            factor = (
+                1 - thresholds.stop_loss_upl_ratio
+                if direction == "long"
+                else 1 + thresholds.stop_loss_upl_ratio
+            )
             sl_trigger_px = self._format_price(avg_px * factor)
         if not tp_trigger_px and not sl_trigger_px:
             return None
@@ -302,14 +310,16 @@ class ProtectionOrderManager:
     def _normalize_threshold(node: ProtectionThresholds | Dict[str, Any]) -> Optional[ProtectionThresholds]:
         if isinstance(node, ProtectionThresholds):
             return ProtectionThresholds(
-                take_profit_pct=max(0.0, float(node.take_profit_pct or 0.0)),
-                stop_loss_pct=max(0.0, float(node.stop_loss_pct or 0.0)),
+                take_profit_upl_ratio=max(0.0, float(node.take_profit_upl_ratio or 0.0)),
+                stop_loss_upl_ratio=max(0.0, float(node.stop_loss_upl_ratio or 0.0)),
             )
         if not isinstance(node, dict):
             return None
-        tp = max(0.0, float(node.get("take_profit_pct") or 0.0))
-        sl = max(0.0, float(node.get("stop_loss_pct") or 0.0))
-        return ProtectionThresholds(take_profit_pct=tp, stop_loss_pct=sl)
+        if "take_profit_upl_ratio" not in node and "stop_loss_upl_ratio" not in node:
+            return None
+        tp = max(0.0, float(node.get("take_profit_upl_ratio") or 0.0))
+        sl = max(0.0, float(node.get("stop_loss_upl_ratio") or 0.0))
+        return ProtectionThresholds(take_profit_upl_ratio=tp, stop_loss_upl_ratio=sl)
 
     @staticmethod
     def _normalize_pos_side(pos_side: object, side_hint: object = None) -> str:

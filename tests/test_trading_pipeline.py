@@ -344,6 +344,34 @@ def test_build_default_protection_config_uses_upl_ratio_settings() -> None:
     }
 
 
+def test_build_default_protection_config_does_not_fallback_to_legacy_pct_fields() -> None:
+    settings = SimpleNamespace(
+        account=SimpleNamespace(okx_td_mode=None, okx_force_pos_side=None),
+        strategy=SimpleNamespace(
+            balance_usage_ratio=0.5,
+            default_leverage=1.0,
+            default_take_profit_pct=0.2,
+            default_stop_loss_pct=0.1,
+        ),
+        runtime=SimpleNamespace(data_staleness_seconds=180),
+        intel=SimpleNamespace(
+            event_gate_mode="degrade",
+            event_gate_degrade_threshold=0.72,
+            event_gate_block_threshold=0.9,
+            event_gate_degrade_confidence_cap=0.45,
+            event_gate_degrade_size_ratio=0.5,
+        ),
+    )
+    engine = TradingEngine(
+        okx_client=SimpleNamespace(),
+        analyzer=SimpleNamespace(),
+        strategy=SimpleNamespace(),
+        settings=settings,
+    )
+
+    assert engine._default_protection_config == {}
+
+
 def test_strategy_step_omits_exchange_protection_when_disabled(monkeypatch) -> None:
     engine = _build_engine()
     features = _sample_features()

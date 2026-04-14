@@ -2,12 +2,34 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.engine.protection import ProtectionMonitor, ProtectionThresholds
 
 
 class _DummyOKX:
     def get_positions(self, inst_type="SWAP"):
         return {"data": []}
+
+
+def test_thresholds_reject_legacy_pct_kwargs() -> None:
+    with pytest.raises(TypeError):
+        ProtectionThresholds(take_profit_pct=0.1, stop_loss_pct=0.05)
+
+
+def test_resolve_inst_threshold_ignores_legacy_pct_keys() -> None:
+    monitor = ProtectionMonitor(
+        okx_client=_DummyOKX(),
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.1, stop_loss_upl_ratio=0.05),
+        per_inst_thresholds={
+            "BTC-USDT-SWAP": {"take_profit_pct": 0.03, "stop_loss_pct": 0.02},
+        },
+    )
+
+    btc = monitor._resolve_threshold("BTC-USDT-SWAP")
+
+    assert btc.take_profit_upl_ratio == 0.1
+    assert btc.stop_loss_upl_ratio == 0.05
 
 
 def test_resolve_inst_threshold_override() -> None:
