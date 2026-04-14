@@ -53,7 +53,7 @@ def test_enforce_places_single_oco_for_live_long_position() -> None:
     )
     manager = ProtectionOrderManager(
         okx_client=client,
-        thresholds=ProtectionThresholds(take_profit_pct=0.06, stop_loss_pct=0.03),
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.06, stop_loss_upl_ratio=0.03),
     )
 
     manager.enforce()
@@ -97,7 +97,7 @@ def test_enforce_cancels_duplicate_oco_orders_before_recreating() -> None:
     )
     manager = ProtectionOrderManager(
         okx_client=client,
-        thresholds=ProtectionThresholds(take_profit_pct=0.06, stop_loss_pct=0.03),
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.06, stop_loss_upl_ratio=0.03),
     )
 
     manager.enforce()
@@ -119,7 +119,7 @@ def test_enforce_cancels_stale_oco_when_position_is_gone() -> None:
     )
     manager = ProtectionOrderManager(
         okx_client=client,
-        thresholds=ProtectionThresholds(take_profit_pct=0.06, stop_loss_pct=0.03),
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.06, stop_loss_upl_ratio=0.03),
     )
 
     manager.enforce()
@@ -160,7 +160,7 @@ def test_enforce_amends_single_existing_oco_when_prices_drift() -> None:
     )
     manager = ProtectionOrderManager(
         okx_client=client,
-        thresholds=ProtectionThresholds(take_profit_pct=0.06, stop_loss_pct=0.03),
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.06, stop_loss_upl_ratio=0.03),
     )
 
     manager.enforce()
@@ -195,7 +195,7 @@ def test_enforce_places_conditional_order_when_only_stop_loss_is_enabled() -> No
     )
     manager = ProtectionOrderManager(
         okx_client=client,
-        thresholds=ProtectionThresholds(take_profit_pct=0.0, stop_loss_pct=0.03),
+        thresholds=ProtectionThresholds(take_profit_upl_ratio=0.0, stop_loss_upl_ratio=0.03),
     )
 
     manager.enforce()

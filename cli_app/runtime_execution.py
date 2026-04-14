@@ -19,7 +19,7 @@ from core.strategy.plugins import format_plugin_snapshot
 from core.utils import NotificationEvent
 
 
-def _normalize_protection_pct(rule: object, fallback: float) -> float:
+def _normalize_protection_ratio(rule: object, fallback: float) -> float:
     if not isinstance(rule, dict):
         return max(0.0, float(fallback or 0.0))
     mode = str(rule.get("mode", "percent") or "percent").strip().lower()
@@ -49,8 +49,8 @@ def _configure_protection_monitor(bundle: RuntimeBundle, entries: list[dict]) ->
         monitor.set_inst_threshold(
             inst_id,
             {
-                "take_profit_upl_ratio": _normalize_protection_pct(protection.get("take_profit"), default_tp),
-                "stop_loss_upl_ratio": _normalize_protection_pct(protection.get("stop_loss"), default_sl),
+                "take_profit_upl_ratio": _normalize_protection_ratio(protection.get("take_profit"), default_tp),
+                "stop_loss_upl_ratio": _normalize_protection_ratio(protection.get("stop_loss"), default_sl),
             },
         )
 

@@ -27,8 +27,8 @@ def _build_engine() -> TradingEngine:
         strategy=SimpleNamespace(
             balance_usage_ratio=0.5,
             default_leverage=1.0,
-            default_take_profit_pct=0.0,
-            default_stop_loss_pct=0.0,
+            default_take_profit_upl_ratio=0.0,
+            default_stop_loss_upl_ratio=0.0,
         ),
         runtime=SimpleNamespace(data_staleness_seconds=180),
         intel=SimpleNamespace(
@@ -301,6 +301,47 @@ def test_strategy_step_only_generates_signal_without_risk(monkeypatch) -> None:
     )
 
     assert bundle.strategy_output is generated_output
+
+
+def test_build_default_protection_config_uses_upl_ratio_settings() -> None:
+    settings = SimpleNamespace(
+        account=SimpleNamespace(okx_td_mode=None, okx_force_pos_side=None),
+        strategy=SimpleNamespace(
+            balance_usage_ratio=0.5,
+            default_leverage=1.0,
+            default_take_profit_upl_ratio=0.2,
+            default_stop_loss_upl_ratio=0.1,
+        ),
+        runtime=SimpleNamespace(data_staleness_seconds=180),
+        intel=SimpleNamespace(
+            event_gate_mode="degrade",
+            event_gate_degrade_threshold=0.72,
+            event_gate_block_threshold=0.9,
+            event_gate_degrade_confidence_cap=0.45,
+            event_gate_degrade_size_ratio=0.5,
+        ),
+    )
+    engine = TradingEngine(
+        okx_client=SimpleNamespace(),
+        analyzer=SimpleNamespace(),
+        strategy=SimpleNamespace(),
+        settings=settings,
+    )
+
+    assert engine._default_protection_config == {
+        "take_profit": {
+            "mode": "percent",
+            "value": 0.2,
+            "trigger_type": "last",
+            "order_type": "market",
+        },
+        "stop_loss": {
+            "mode": "percent",
+            "value": 0.1,
+            "trigger_type": "last",
+            "order_type": "market",
+        },
+    }
 
 
 def test_strategy_step_omits_exchange_protection_when_disabled(monkeypatch) -> None:

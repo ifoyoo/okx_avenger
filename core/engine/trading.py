@@ -962,19 +962,31 @@ class TradingEngine:
 
     def _build_default_protection_config(self) -> Dict[str, Any]:
         config: Dict[str, Any] = {}
-        tp_pct = self._sanitize_positive_value(getattr(self.strategy_settings, "default_take_profit_pct", 0.0))
-        if tp_pct > 0:
+        tp_ratio = self._sanitize_positive_value(
+            getattr(
+                self.strategy_settings,
+                "default_take_profit_upl_ratio",
+                getattr(self.strategy_settings, "default_take_profit_pct", 0.0),
+            )
+        )
+        if tp_ratio > 0:
             config["take_profit"] = {
                 "mode": "percent",
-                "value": tp_pct,
+                "value": tp_ratio,
                 "trigger_type": "last",
                 "order_type": "market",
             }
-        sl_pct = self._sanitize_positive_value(getattr(self.strategy_settings, "default_stop_loss_pct", 0.0))
-        if sl_pct > 0:
+        sl_ratio = self._sanitize_positive_value(
+            getattr(
+                self.strategy_settings,
+                "default_stop_loss_upl_ratio",
+                getattr(self.strategy_settings, "default_stop_loss_pct", 0.0),
+            )
+        )
+        if sl_ratio > 0:
             config["stop_loss"] = {
                 "mode": "percent",
-                "value": sl_pct,
+                "value": sl_ratio,
                 "trigger_type": "last",
                 "order_type": "market",
             }

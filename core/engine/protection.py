@@ -13,10 +13,41 @@ from loguru import logger
 from core.client import OKXClient
 
 
-@dataclass
+@dataclass(init=False)
 class ProtectionThresholds:
     take_profit_upl_ratio: float
     stop_loss_upl_ratio: float
+
+    def __init__(
+        self,
+        take_profit_upl_ratio: float = 0.0,
+        stop_loss_upl_ratio: float = 0.0,
+        *,
+        take_profit_pct: Optional[float] = None,
+        stop_loss_pct: Optional[float] = None,
+    ) -> None:
+        if take_profit_pct is not None:
+            take_profit_upl_ratio = take_profit_pct
+        if stop_loss_pct is not None:
+            stop_loss_upl_ratio = stop_loss_pct
+        self.take_profit_upl_ratio = float(take_profit_upl_ratio or 0.0)
+        self.stop_loss_upl_ratio = float(stop_loss_upl_ratio or 0.0)
+
+    @property
+    def take_profit_pct(self) -> float:
+        return self.take_profit_upl_ratio
+
+    @take_profit_pct.setter
+    def take_profit_pct(self, value: float) -> None:
+        self.take_profit_upl_ratio = float(value or 0.0)
+
+    @property
+    def stop_loss_pct(self) -> float:
+        return self.stop_loss_upl_ratio
+
+    @stop_loss_pct.setter
+    def stop_loss_pct(self, value: float) -> None:
+        self.stop_loss_upl_ratio = float(value or 0.0)
 
 
 class ProtectionMonitor:
