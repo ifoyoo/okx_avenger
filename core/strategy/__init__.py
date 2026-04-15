@@ -14,9 +14,11 @@ from .plugins import (
     build_signal_plugin_manager,
 )
 from .regime import HigherTimeframeGate, evaluate_higher_timeframe_gate
+from .templates import EntryTemplateMatch, evaluate_entry_template
 
 __all__ = [
     "AnalysisView",
+    "EntryTemplateMatch",
     "HigherTimeframeGate",
     "ObjectiveSignal",
     "ObjectiveSignalGenerator",
@@ -27,5 +29,6 @@ __all__ = [
     "Strategy",
     "StrategyOutput",
     "build_signal_plugin_manager",
+    "evaluate_entry_template",
     "evaluate_higher_timeframe_gate",
 ]
