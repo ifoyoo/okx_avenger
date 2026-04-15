@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Any, Optional, Sequence, Tuple, List
 
 from core.models import SignalAction
-from .signals import ObjectiveSignal
+from .signals import ObjectiveSignal, REVERSAL_ONLY_INDICATOR_NOTES
+from .plugins import CONFIRMATION_ONLY_PLUGINS
 
 
 ACTION_KEYWORDS = {
@@ -222,12 +223,17 @@ class SignalFusionEngine:
         analysis_view: AnalysisView,
         llm_guard: Optional[LLMInfluenceGuard] = None,
         arbitration_config: Optional[ConflictArbitrationConfig] = None,
+        seeded_action: SignalAction = SignalAction.HOLD,
+        seeded_confidence: float = 0.4,
+        allow_support_promotion: bool = False,
     ) -> FusionResult:
         indicator = self._get_signal(objective_signals, "indicator")
         higher_tf = self._get_signal(objective_signals, "higher_timeframe")
-        base_action = indicator.action if indicator else SignalAction.HOLD
-        base_conf = indicator.confidence if indicator else 0.4
+        base_action = seeded_action
+        base_conf = float(seeded_confidence or 0.0) if seeded_confidence is not None else 0.0
         notes: List[str] = []
+        if indicator and indicator.action == seeded_action and indicator.note not in REVERSAL_ONLY_INDICATOR_NOTES:
+            base_conf = max(base_conf, float(indicator.confidence or 0.0))
         if higher_tf and higher_tf.action != SignalAction.HOLD:
             if higher_tf.action == base_action:
                 base_conf = min(1.0, base_conf + 0.15 * max(0.5, higher_tf.confidence))
@@ -236,6 +242,10 @@ class SignalFusionEngine:
             notes.append(f"多周期：{higher_tf.note}")
         for support in objective_signals:
             if support.name not in self.SUPPORTIVE_NAMES or support.action == SignalAction.HOLD:
+                continue
+            if support.name in CONFIRMATION_ONLY_PLUGINS:
+                continue
+            if base_action == SignalAction.HOLD and not allow_support_promotion:
                 continue
             label = {
                 "volume_pressure": "成交量",
@@ -365,12 +375,17 @@ class SignalFusionEngine:
     ) -> Tuple[SignalAction, float, Optional[str]]:
         if not config.enabled:
             return action, confidence, None
-        directional = [
-            signal
-            for signal in objective_signals
-            if signal.name not in {"indicator", "higher_timeframe"}
-            and signal.action in {SignalAction.BUY, SignalAction.SELL}
-        ]
+        directional: List[ObjectiveSignal] = []
+        for sig in objective_signals:
+            if sig.name == "higher_timeframe":
+                continue
+            if sig.name in CONFIRMATION_ONLY_PLUGINS:
+                continue
+            if sig.name == "indicator" and sig.note in REVERSAL_ONLY_INDICATOR_NOTES:
+                continue
+            if sig.action not in {SignalAction.BUY, SignalAction.SELL}:
+                continue
+            directional.append(sig)
         if len(directional) < max(1, int(config.min_directional_signals or 1)):
             return action, confidence, None
         buy_score = sum(max(0.0, float(sig.confidence or 0.0)) for sig in directional if sig.action == SignalAction.BUY)

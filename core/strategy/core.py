@@ -24,7 +24,9 @@ from .fusion import (
 )
 from .plugins import build_signal_plugin_manager
 from .positioning import PositionSizer
+from .regime import HigherTimeframeGate, evaluate_higher_timeframe_gate
 from .signals import ObjectiveSignal, ObjectiveSignalGenerator
+from .templates import EntryTemplateMatch, evaluate_entry_template
 
 
 @dataclass
@@ -33,6 +35,8 @@ class StrategyOutput:
     objective_signals: Tuple[ObjectiveSignal, ...]
     analysis_view: AnalysisView
     fusion_notes: Tuple[str, ...]
+    gate_decision: Optional[HigherTimeframeGate] = None
+    entry_template: Optional[EntryTemplateMatch] = None
 
 
 class Strategy:
@@ -65,6 +69,10 @@ class Strategy:
         analysis_view = parsed_analysis_view
         if structured_analysis_view is not None and not self.analysis_interpreter.has_structured_payload(analysis_text):
             analysis_view = structured_analysis_view
+
+        gate_decision = evaluate_higher_timeframe_gate(higher_features)
+        entry_template = evaluate_entry_template(gate=gate_decision, features=features)
+
         llm_guard = LLMInfluenceGuard(
             enabled=bool(llm_influence_enabled),
             max_confidence_delta=self._llm_influence_guard.max_confidence_delta,
@@ -76,12 +84,18 @@ class Strategy:
             analysis_view,
             llm_guard=llm_guard,
             arbitration_config=self._conflict_arbitration,
+            seeded_action=entry_template.action if entry_template else SignalAction.HOLD,
+            seeded_confidence=entry_template.confidence_floor if entry_template else 0.4,
+            allow_support_promotion=entry_template is not None,
         )
 
         latest = features.iloc[-1]
         liquidity_ok, _liquidity_note = self.signal_generator.liquidity_snapshot(features)
         env_factor, env_note = self.signal_generator.volatility_regime(higher_features)
         notes = list(fusion.notes)
+        notes.append(f"[gate] {gate_decision.reason_code}: {gate_decision.note}")
+        if entry_template is not None:
+            notes.append(f"[template] {entry_template.template_name}: {entry_template.note}")
         if env_note:
             notes.append(env_note)
         arbitration_note = next((item for item in fusion.notes if str(item).startswith("[arb]")), "")
@@ -89,21 +103,14 @@ class Strategy:
             logger.info("event=strategy_conflict_arbiter note={note}", note=arbitration_note)
         action = fusion.action
         confidence = fusion.confidence
-        higher_bias = next((sig for sig in objective_signals if sig.name == "higher_timeframe"), None)
-        if (
-            higher_bias
-            and higher_bias.action != SignalAction.HOLD
-            and action != SignalAction.HOLD
-            and higher_bias.action != action
-            and higher_bias.confidence >= 0.4
-        ):
+        if entry_template is None:
             action = SignalAction.HOLD
-            confidence = min(confidence, 0.35)
-            notes.append("多周期过滤：高阶趋势与信号方向冲突，跳过本次交易。")
+            confidence = min(confidence, 0.4)
         if action != SignalAction.HOLD and not liquidity_ok:
             action = SignalAction.HOLD
             confidence = min(confidence, 0.3)
         size = 0.0
+        higher_bias = next((sig for sig in objective_signals if sig.name == "higher_timeframe"), None)
         trend_bias = higher_bias.action if higher_bias else SignalAction.HOLD
         if action != SignalAction.HOLD:
             size = self.position_sizer.size(
@@ -159,6 +166,8 @@ class Strategy:
             objective_signals=objective_signals,
             analysis_view=analysis_view,
             fusion_notes=tuple(notes),
+            gate_decision=gate_decision,
+            entry_template=entry_template,
         )
 
     @staticmethod

@@ -30,6 +30,13 @@ DEFAULT_METHOD_MAP: Dict[str, str] = {
     "one_yang_three_yin": "_one_yang_three_yin_signal",
 }
 
+CONFIRMATION_ONLY_PLUGINS: frozenset[str] = frozenset(
+    {
+        # Kept for logging and post-hoc reasoning, but should not initiate trades in the new gate+template flow.
+        "box_oscillation",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SignalPluginDefinition:
@@ -179,6 +186,7 @@ def format_plugin_snapshot(manager: SignalPluginManager) -> str:
 
 
 __all__ = [
+    "CONFIRMATION_ONLY_PLUGINS",
     "SignalPluginDefinition",
     "SignalPluginManager",
     "build_signal_plugin_manager",

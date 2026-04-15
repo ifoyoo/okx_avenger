@@ -147,3 +147,64 @@ def test_generate_signal_reason_contains_arb_tag(monkeypatch) -> None:
     )
 
     assert "[arb]" in result.trade_signal.reason
+
+
+def _features() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "close": 100.0,
+                "open": 99.6,
+                "high": 100.3,
+                "low": 99.4,
+                "volume": 1000.0,
+                "volume_usd": 100000.0,
+                "returns": 0.001,
+                "rsi": 55.0,
+                "ema_fast": 99.8,
+                "ema_slow": 99.4,
+                "macd": 0.2,
+                "macd_signal": 0.15,
+                "macd_hist": 0.05,
+                "atr": 1.0,
+                "bb_high": 102.0,
+                "bb_low": 98.0,
+                "bb_width": 0.03,
+                "obv": 10000.0,
+                "mfi": 56.0,
+            }
+            for _ in range(90)
+        ]
+    )
+
+
+def test_generate_signal_keeps_hold_without_template_even_when_support_plugin_is_directional(monkeypatch) -> None:
+    strategy = Strategy()
+    context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
+    features = _features()
+
+    monkeypatch.setattr(
+        strategy.signal_generator,
+        "build",
+        lambda *_args, **_kwargs: (
+            ObjectiveSignal("indicator", SignalAction.HOLD, 0.4, "hold"),
+            ObjectiveSignal("volume_breakout", SignalAction.BUY, 0.82, "breakout"),
+        ),
+    )
+
+    result = strategy.generate_signal(context, features, '{"action":"hold","confidence":0.5,"reason":"flat"}', None)
+
+    assert result.trade_signal.action == SignalAction.HOLD
+    assert result.entry_template is None
+
+
+def test_generate_signal_records_gate_reason_and_template_name() -> None:
+    strategy = Strategy()
+    context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
+    features = _features()
+    higher_features = {"1H": _features().tail(10).assign(adx=22.0, rsi=57.0)}
+
+    result = strategy.generate_signal(context, features, '{"action":"buy","confidence":0.6,"reason":"ok"}', higher_features)
+
+    assert result.gate_decision is not None
+    assert result.trade_signal.reason

@@ -32,7 +32,14 @@ def test_llm_reverse_is_blocked_to_hold() -> None:
         allow_hold_to_direction=False,
     )
 
-    fused = engine.fuse(_signals(SignalAction.BUY, 0.62), analysis, llm_guard=guard)
+    fused = engine.fuse(
+        _signals(SignalAction.BUY, 0.62),
+        analysis,
+        llm_guard=guard,
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.62,
+        allow_support_promotion=True,
+    )
 
     assert fused.action == SignalAction.HOLD
     assert fused.confidence <= 0.62
@@ -49,7 +56,14 @@ def test_llm_hold_promotion_blocked() -> None:
         allow_hold_to_direction=False,
     )
 
-    fused = engine.fuse(_signals(SignalAction.HOLD, 0.4), analysis, llm_guard=guard)
+    fused = engine.fuse(
+        _signals(SignalAction.HOLD, 0.4),
+        analysis,
+        llm_guard=guard,
+        seeded_action=SignalAction.HOLD,
+        seeded_confidence=0.4,
+        allow_support_promotion=False,
+    )
 
     assert fused.action == SignalAction.HOLD
     assert any("HOLD" in note for note in fused.notes)
@@ -65,7 +79,14 @@ def test_llm_confidence_is_capped_by_delta() -> None:
         allow_hold_to_direction=False,
     )
 
-    fused = engine.fuse(_signals(SignalAction.BUY, 0.55), analysis, llm_guard=guard)
+    fused = engine.fuse(
+        _signals(SignalAction.BUY, 0.55),
+        analysis,
+        llm_guard=guard,
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.55,
+        allow_support_promotion=True,
+    )
 
     assert fused.action == SignalAction.BUY
     assert fused.confidence <= 0.63 + 1e-9
@@ -83,11 +104,17 @@ def test_conflict_arbitration_boosts_same_direction() -> None:
         signals,
         analysis,
         arbitration_config=ConflictArbitrationConfig(enabled=False),
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.56,
+        allow_support_promotion=True,
     )
     enabled = engine.fuse(
         signals,
         analysis,
         arbitration_config=ConflictArbitrationConfig(enabled=True, same_side_boost=0.12),
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.56,
+        allow_support_promotion=True,
     )
 
     assert enabled.action == SignalAction.BUY
@@ -101,7 +128,7 @@ def test_conflict_arbitration_can_degrade_to_hold() -> None:
     signals = (
         ObjectiveSignal("indicator", SignalAction.BUY, 0.72, "indicator"),
         _plugin_signal("volume_pressure", SignalAction.SELL, 0.92),
-        _plugin_signal("box_oscillation", SignalAction.SELL, 0.87),
+        _plugin_signal("volume_breakout", SignalAction.SELL, 0.87),
     )
     fused = engine.fuse(
         signals,
@@ -113,8 +140,24 @@ def test_conflict_arbitration_can_degrade_to_hold() -> None:
             hold_confidence_cap=0.3,
             min_directional_signals=2,
         ),
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.72,
+        allow_support_promotion=True,
     )
 
     assert fused.action == SignalAction.HOLD
     assert fused.confidence <= 0.3
     assert any("decision=hold" in note for note in fused.notes)
+
+
+def test_support_signal_should_not_promote_from_hold_by_default() -> None:
+    engine = SignalFusionEngine()
+    analysis = AnalysisView(action=SignalAction.HOLD, confidence=0.5, reason="flat")
+    signals = (
+        ObjectiveSignal("indicator", SignalAction.HOLD, 0.4, "indicator"),
+        _plugin_signal("volume_breakout", SignalAction.BUY, 0.82),
+    )
+
+    fused = engine.fuse(signals, analysis)
+
+    assert fused.action == SignalAction.HOLD

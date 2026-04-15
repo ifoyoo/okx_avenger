@@ -31,6 +31,17 @@ BOX_LOOKBACK = 60
 BOX_MIN_WIDTH = 0.05
 BOX_MAX_WIDTH = 0.22
 
+# Notes that represent pure mean-reversion "reversal-only" hints from the indicator block.
+# In the new gate+template flow, these are treated as confirmation only (not initiators).
+REVERSAL_ONLY_INDICATOR_NOTES: frozenset[str] = frozenset(
+    {
+        "RSI 极度超卖",
+        "RSI 极度超买",
+        "价格触及布林下轨并伴随动能修复",
+        "价格触及布林上轨且动能减弱",
+    }
+)
+
 
 @dataclass
 class ObjectiveSignal:
@@ -491,5 +502,4 @@ class ObjectiveSignalGenerator:
         }
 
 
-__all__ = ["ObjectiveSignal", "ObjectiveSignalGenerator"]
-
+__all__ = ["ObjectiveSignal", "ObjectiveSignalGenerator", "REVERSAL_ONLY_INDICATOR_NOTES"]
