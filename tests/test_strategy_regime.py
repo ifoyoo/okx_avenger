@@ -1,6 +1,6 @@
 import pandas as pd
 
-from core.strategy import evaluate_higher_timeframe_gate
+from core.strategy import HigherTimeframeGate, evaluate_higher_timeframe_gate
 
 
 def _frame(
@@ -70,6 +70,7 @@ def test_evaluate_higher_timeframe_gate_blocks_shorts_without_adx_confirmation()
 def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_are_empty() -> None:
     gate = evaluate_higher_timeframe_gate({"1H": pd.DataFrame()})
 
+    assert isinstance(gate, HigherTimeframeGate)
     assert gate.allow_long is False
     assert gate.allow_short is False
     assert gate.reason_code == "no_trade"
@@ -84,6 +85,69 @@ def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_missing_re
     )
     gate = evaluate_higher_timeframe_gate({"1H": frame})
 
+    assert isinstance(gate, HigherTimeframeGate)
     assert gate.allow_long is False
     assert gate.allow_short is False
     assert gate.reason_code == "no_trade"
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_features_map_is_none() -> None:
+    gate = evaluate_higher_timeframe_gate(None)
+
+    assert isinstance(gate, HigherTimeframeGate)
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
+    assert gate.note == "missing 1H features"
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_missing_1h_key() -> None:
+    gate = evaluate_higher_timeframe_gate({})
+
+    assert isinstance(gate, HigherTimeframeGate)
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
+    assert gate.note == "missing 1H features"
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_are_none() -> None:
+    gate = evaluate_higher_timeframe_gate({"1H": None})
+
+    assert isinstance(gate, HigherTimeframeGate)
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
+    assert gate.note == "missing 1H features"
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_contain_nan() -> None:
+    frame = pd.DataFrame(
+        [
+            {"ema_fast": 100.0, "ema_slow": 101.0, "rsi": 40.0, "adx": 25.0},
+            {"ema_fast": float("nan"), "ema_slow": 101.0, "rsi": 40.0, "adx": 25.0},
+        ]
+    )
+    gate = evaluate_higher_timeframe_gate({"1H": frame})
+
+    assert isinstance(gate, HigherTimeframeGate)
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
+    assert gate.note == "invalid 1H features"
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_contain_inf() -> None:
+    frame = pd.DataFrame(
+        [
+            {"ema_fast": 100.0, "ema_slow": 101.0, "rsi": 40.0, "adx": 25.0},
+            {"ema_fast": 99.0, "ema_slow": 101.0, "rsi": 40.0, "adx": float("inf")},
+        ]
+    )
+    gate = evaluate_higher_timeframe_gate({"1H": frame})
+
+    assert isinstance(gate, HigherTimeframeGate)
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
+    assert gate.note == "invalid 1H features"

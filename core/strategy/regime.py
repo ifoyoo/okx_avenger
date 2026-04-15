@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Dict, Optional
 
 import pandas as pd
@@ -43,6 +44,8 @@ def evaluate_higher_timeframe_gate(features_map: Optional[Dict[str, pd.DataFrame
         adx = float(latest.get("adx"))
     except (TypeError, ValueError):
         return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "invalid 1H features")
+    if not all(math.isfinite(v) for v in (ema_fast, ema_slow, rsi, adx)):
+        return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "invalid 1H features")
 
     slope = 0.0
     if len(frame) >= 2:
@@ -50,6 +53,8 @@ def evaluate_higher_timeframe_gate(features_map: Optional[Dict[str, pd.DataFrame
             prev_fast = float(frame["ema_fast"].iloc[-2])
             slope = float(ema_fast - prev_fast)
         except (TypeError, ValueError):
+            return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "invalid 1H features")
+        if not math.isfinite(prev_fast):
             return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "invalid 1H features")
 
     long_ok = ema_fast > ema_slow and slope > 0 and rsi >= 52.0
