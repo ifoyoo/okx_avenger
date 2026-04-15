@@ -396,28 +396,46 @@ class ExecutionEngine:
         return age_ms >= ttl_minutes * 60 * 1000
 
     def has_same_direction_position(self, inst_id: str, action: SignalAction) -> bool:
+        return self.same_direction_position_size(inst_id, action) > 0
+
+    def same_direction_position_size(
+        self,
+        inst_id: str,
+        action: SignalAction,
+        latest_price: Optional[float] = None,
+    ) -> float:
         if action not in {SignalAction.BUY, SignalAction.SELL}:
-            return False
+            return 0.0
         if not hasattr(self.okx, "get_positions"):
-            return False
+            return 0.0
         try:
             payload = self.okx.get_positions(inst_type="SWAP")
         except Exception as exc:  # pragma: no cover
             logger.warning("查询持仓失败，无法判断同向持仓 inst_id={} err={}", inst_id, exc)
-            return False
+            return 0.0
         data = payload.get("data") if isinstance(payload, dict) else []
         if not isinstance(data, list):
-            return False
+            return 0.0
         inst_key = str(inst_id or "").upper()
         expected_direction = "long" if action == SignalAction.BUY else "short"
+        meta = self._get_instrument_meta(inst_id)
+        total_size = 0.0
         for entry in data:
             if not isinstance(entry, dict):
                 continue
             if str(entry.get("instId") or "").upper() != inst_key:
                 continue
-            if self._infer_position_direction(entry) == expected_direction:
-                return True
-        return False
+            if self._infer_position_direction(entry) != expected_direction:
+                continue
+            try:
+                raw_size = abs(float(entry.get("pos") or 0.0))
+            except (TypeError, ValueError):
+                raw_size = 0.0
+            if raw_size <= 0:
+                continue
+            converted = self._contracts_to_underlying(raw_size, meta, latest_price) if meta else raw_size
+            total_size += converted if converted and converted > 0 else raw_size
+        return total_size
 
     def _has_live_pending_order(self, inst_id: str, cl_ord_id: Optional[str]) -> bool:
         if not hasattr(self.okx, "list_pending_orders"):

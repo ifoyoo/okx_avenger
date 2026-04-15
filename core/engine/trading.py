@@ -291,6 +291,7 @@ class TradingEngine:
                 dry_run=dry_run,
                 signal=risk_bundle.signal,
                 features=data_bundle.features,
+                max_position=max_position,
             )
             execution_ms = (time.perf_counter() - step_started) * 1000.0
         except Exception as exc:
@@ -514,9 +515,11 @@ class TradingEngine:
         dry_run: bool,
         signal: TradeSignal,
         features: pd.DataFrame,
+        max_position: Optional[float] = None,
     ) -> ExecutionBundle:
         exec_logger = logger.bind(trace_id=trace_id, inst_id=inst_id, timeframe=timeframe)
         latest_row = features.iloc[-1]
+        latest_price = float(latest_row.get("close", 0.0) or 0.0)
         td_mode = self._determine_td_mode(inst_id)
         pos_side = self._determine_pos_side(signal.action, inst_id) if signal.action != SignalAction.HOLD else None
         execution_plan = self.execution_engine.build_plan(
@@ -524,7 +527,7 @@ class TradingEngine:
             signal=signal,
             td_mode=td_mode,
             pos_side=pos_side,
-            latest_price=float(latest_row.get("close", 0.0) or 0.0),
+            latest_price=latest_price,
             atr=float(latest_row.get("atr", 0.0) or 0.0),
             leverage=self.leverage,
             trace_id=trace_id,
@@ -556,14 +559,20 @@ class TradingEngine:
         if (
             not execution_plan.blocked
             and signal.action in {SignalAction.BUY, SignalAction.SELL}
-            and self.execution_engine.has_same_direction_position(inst_id, signal.action)
         ):
-            position_reason = f"存在同向持仓：{inst_id} 当前已有同向持仓，跳过重复开仓。"
-            execution_plan.blocked = True
-            execution_plan.block_reason = position_reason
-            execution_plan.protection = None
-            execution_plan.notes = tuple(execution_plan.notes) + (position_reason,)
-            exec_logger.warning("event=same_direction_position_blocked reason={reason}", reason=position_reason)
+            position_reason = self._apply_same_direction_position_rule(
+                execution_plan=execution_plan,
+                inst_id=inst_id,
+                signal=signal,
+                latest_price=latest_price,
+                max_position=max_position,
+            )
+            if position_reason:
+                execution_plan.blocked = True
+                execution_plan.block_reason = position_reason
+                execution_plan.protection = None
+                execution_plan.notes = tuple(execution_plan.notes) + (position_reason,)
+                exec_logger.warning("event=same_direction_position_blocked reason={reason}", reason=position_reason)
         execution_report: Optional[ExecutionReport] = None
         order_result: Optional[Dict[str, Any]] = None
         if not dry_run and not execution_plan.blocked:
@@ -593,6 +602,50 @@ class TradingEngine:
             dry_run=dry_run,
         )
         return execution_bundle
+
+    def _apply_same_direction_position_rule(
+        self,
+        *,
+        execution_plan: ExecutionPlan,
+        inst_id: str,
+        signal: TradeSignal,
+        latest_price: float,
+        max_position: Optional[float],
+    ) -> Optional[str]:
+        allow_scale_in = bool(getattr(self.runtime_settings, "execution_allow_same_direction_scale_in", False))
+        if not allow_scale_in:
+            if self.execution_engine.has_same_direction_position(inst_id, signal.action):
+                return f"存在同向持仓：{inst_id} 当前已有同向持仓，跳过重复开仓。"
+            return None
+        current_size = self.execution_engine.same_direction_position_size(
+            inst_id,
+            signal.action,
+            latest_price=latest_price,
+        )
+        if current_size <= 0:
+            return None
+        base_limit = max(0.0, float(max_position or 0.0))
+        if base_limit <= 0:
+            return None
+        try:
+            multiplier = float(
+                getattr(self.runtime_settings, "execution_same_direction_scale_in_multiplier", 1.0) or 1.0
+            )
+        except (TypeError, ValueError):
+            multiplier = 1.0
+        total_limit = base_limit * max(1.0, multiplier)
+        remaining = total_limit - current_size
+        min_trade_size = self.execution_engine.get_min_underlying_size(inst_id, latest_price)
+        if remaining <= 1e-12:
+            return f"存在同向持仓：{inst_id} 当前同向仓位已达加仓上限，跳过重复开仓。"
+        if min_trade_size and min_trade_size > 0 and remaining + 1e-12 < min_trade_size:
+            return f"存在同向持仓：{inst_id} 当前同向仓位已达加仓上限，跳过重复开仓。"
+        if execution_plan.size > remaining:
+            execution_plan.size = remaining
+            execution_plan.notes = tuple(execution_plan.notes) + (
+                f"加仓剩余额度 {remaining:.6f}，已按同向仓位上限自动缩量。",
+            )
+        return None
 
     def _maybe_cancel_stale_pending_order(self, inst_id: str) -> Optional[str]:
         ttl_minutes = max(

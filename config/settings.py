@@ -116,6 +116,11 @@ class RuntimeSettings(SettingsBase):
     data_staleness_seconds: int = Field(180, alias="DATA_STALENESS_SECONDS")
     execution_pending_timeout_seconds: float = Field(0.0, alias="EXECUTION_PENDING_TIMEOUT_SECONDS")
     execution_pending_order_ttl_minutes: int = Field(60, alias="EXECUTION_PENDING_ORDER_TTL_MINUTES")
+    execution_allow_same_direction_scale_in: bool = Field(False, alias="EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN")
+    execution_same_direction_scale_in_multiplier: float = Field(
+        1.0,
+        alias="EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER",
+    )
     execution_reconcile_position: bool = Field(True, alias="EXECUTION_RECONCILE_POSITION")
     config_snapshot_path: str = Field("data/config_snapshot.json", alias="CONFIG_SNAPSHOT_PATH")
     runtime_heartbeat_path: str = Field("data/runtime_heartbeat.json", alias="RUNTIME_HEARTBEAT_PATH")
@@ -129,6 +134,13 @@ class RuntimeSettings(SettingsBase):
     def _validate_positive_int(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("value must be > 0")
+        return value
+
+    @field_validator("execution_same_direction_scale_in_multiplier", mode="after")
+    @classmethod
+    def _validate_scale_in_multiplier(cls, value: float) -> float:
+        if value < 1:
+            raise ValueError("EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER must be >= 1")
         return value
 
 
@@ -328,6 +340,8 @@ def build_config_snapshot(settings: AppSettings) -> Dict[str, Any]:
             "feature_min_samples": settings.runtime.feature_min_samples,
             "data_staleness_seconds": settings.runtime.data_staleness_seconds,
             "execution_pending_timeout_seconds": settings.runtime.execution_pending_timeout_seconds,
+            "execution_allow_same_direction_scale_in": settings.runtime.execution_allow_same_direction_scale_in,
+            "execution_same_direction_scale_in_multiplier": settings.runtime.execution_same_direction_scale_in_multiplier,
             "execution_reconcile_position": settings.runtime.execution_reconcile_position,
             "config_snapshot_path": settings.runtime.config_snapshot_path,
             "runtime_heartbeat_path": settings.runtime.runtime_heartbeat_path,

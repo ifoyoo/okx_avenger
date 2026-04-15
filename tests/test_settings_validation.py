@@ -32,9 +32,8 @@ def test_strategy_settings_reject_invalid_upl_ratio() -> None:
 
 
 def test_strategy_settings_expose_upl_ratio_defaults() -> None:
-    defaults = StrategySettings()
-    assert defaults.default_take_profit_upl_ratio == 0.2
-    assert defaults.default_stop_loss_upl_ratio == 0.1
+    assert StrategySettings.model_fields["default_take_profit_upl_ratio"].default == 0.2
+    assert StrategySettings.model_fields["default_stop_loss_upl_ratio"].default == 0.1
 
     settings = StrategySettings(
         DEFAULT_TAKE_PROFIT_UPL_RATIO=0.34,
@@ -54,15 +53,27 @@ def test_intel_settings_reject_invalid_threshold_order() -> None:
 
 
 def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
-    defaults = RuntimeSettings()
-    assert defaults.execution_pending_order_ttl_minutes == 60
+    assert RuntimeSettings.model_fields["execution_pending_order_ttl_minutes"].default == 60
+    assert RuntimeSettings.model_fields["execution_allow_same_direction_scale_in"].default is False
+    assert RuntimeSettings.model_fields["execution_same_direction_scale_in_multiplier"].default == 1.0
 
-    runtime = RuntimeSettings(EXECUTION_PENDING_ORDER_TTL_MINUTES=30)
+    runtime = RuntimeSettings(
+        EXECUTION_PENDING_ORDER_TTL_MINUTES=30,
+        EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN=True,
+        EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=3.0,
+    )
 
     assert not hasattr(runtime, "app_version")
     assert not hasattr(runtime, "app_author")
     assert not hasattr(runtime, "protection_monitor_interval_seconds")
     assert runtime.execution_pending_order_ttl_minutes == 30
+    assert runtime.execution_allow_same_direction_scale_in is True
+    assert runtime.execution_same_direction_scale_in_multiplier == 3.0
+
+
+def test_runtime_settings_reject_invalid_same_direction_scale_in_multiplier() -> None:
+    with pytest.raises(ValidationError):
+        RuntimeSettings(EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=0.5)
 
 
 def test_notification_settings_normalize_level() -> None:

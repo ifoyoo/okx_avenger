@@ -192,7 +192,7 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
         assert daily_stats == {"date": "2026-04-09"}
         return risk_step_output
 
-    def _fake_execution_step(*, inst_id, timeframe, trace_id, dry_run, signal, features):
+    def _fake_execution_step(*, inst_id, timeframe, trace_id, dry_run, signal, features, max_position):
         events.append("execution")
         assert inst_id == "BTC-USDT-SWAP"
         assert timeframe == "5m"
@@ -201,6 +201,7 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
         assert dry_run is True
         assert signal is risk_signal
         assert features is data_step_output.features
+        assert max_position == 0.01
         return execution_step_output
 
     def _fake_log_decision(*, features, inst_id, timeframe, trace_id, summary, strategy_output, signal):
@@ -843,6 +844,150 @@ def test_execution_step_blocks_when_same_direction_position_exists(monkeypatch) 
     assert bundle.plan.blocked is True
     assert bundle.report is None
     assert "同向持仓" in (bundle.plan.block_reason or "")
+
+
+def test_execution_step_allows_same_direction_scale_in_when_enabled(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.runtime_settings.execution_allow_same_direction_scale_in = True
+    engine.runtime_settings.execution_same_direction_scale_in_multiplier = 3.0
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.03)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="market",
+        size=0.03,
+        price=None,
+        est_slippage=0.0,
+    )
+    captured = {"size": None}
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(
+        engine.execution_engine,
+        "same_direction_position_size",
+        lambda inst_id, action, latest_price=None: 0.025,
+    )
+    monkeypatch.setattr(engine.execution_engine, "get_min_underlying_size", lambda inst_id, latest_price: 0.001)
+
+    def _execute(plan):
+        captured["size"] = plan.size
+        return SimpleNamespace(success=True, response={"ordId": "1"}, code=None, error=None)
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+        max_position=0.02,
+    )
+
+    assert bundle.plan.blocked is False
+    assert captured["size"] == 0.03
+
+
+def test_execution_step_blocks_when_same_direction_scale_in_limit_reached(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.runtime_settings.execution_allow_same_direction_scale_in = True
+    engine.runtime_settings.execution_same_direction_scale_in_multiplier = 3.0
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.03)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="market",
+        size=0.03,
+        price=None,
+        est_slippage=0.0,
+    )
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(
+        engine.execution_engine,
+        "same_direction_position_size",
+        lambda inst_id, action, latest_price=None: 0.06,
+    )
+    monkeypatch.setattr(engine.execution_engine, "get_min_underlying_size", lambda inst_id, latest_price: 0.001)
+
+    def _should_not_execute(_plan):
+        raise AssertionError("scale-in limit should block further same-direction orders")
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _should_not_execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+        max_position=0.02,
+    )
+
+    assert bundle.plan.blocked is True
+    assert bundle.report is None
+    assert "加仓上限" in (bundle.plan.block_reason or "")
+
+
+def test_execution_step_caps_same_direction_scale_in_to_remaining_capacity(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.runtime_settings.execution_allow_same_direction_scale_in = True
+    engine.runtime_settings.execution_same_direction_scale_in_multiplier = 3.0
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.03)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="cross",
+        pos_side="long",
+        order_type="market",
+        size=0.03,
+        price=None,
+        est_slippage=0.0,
+    )
+    captured = {"size": None}
+
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(
+        engine.execution_engine,
+        "same_direction_position_size",
+        lambda inst_id, action, latest_price=None: 0.05,
+    )
+    monkeypatch.setattr(engine.execution_engine, "get_min_underlying_size", lambda inst_id, latest_price: 0.001)
+
+    def _execute(plan):
+        captured["size"] = plan.size
+        return SimpleNamespace(success=True, response={"ordId": "1"}, code=None, error=None)
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+        max_position=0.02,
+    )
+
+    assert bundle.plan.blocked is False
+    assert captured["size"] == pytest.approx(0.01)
+    assert any("加仓剩余额度" in note for note in bundle.plan.notes)
 
 
 def test_feature_min_samples_gate() -> None:
