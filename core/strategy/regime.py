@@ -22,14 +22,35 @@ def evaluate_higher_timeframe_gate(features_map: Optional[Dict[str, pd.DataFrame
         return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "missing 1H features")
 
     frame = features_map["1H"]
+    required = {"ema_fast", "ema_slow", "rsi", "adx"}
+    missing = sorted(required.difference(set(frame.columns)))
+    if missing:
+        return HigherTimeframeGate(
+            False,
+            False,
+            False,
+            False,
+            "unknown",
+            "no_trade",
+            f"invalid 1H features (missing columns: {', '.join(missing)})",
+        )
+
     latest = frame.iloc[-1]
-    ema_fast = float(latest.get("ema_fast", 0.0) or 0.0)
-    ema_slow = float(latest.get("ema_slow", 0.0) or 0.0)
-    rsi = float(latest.get("rsi", 50.0) or 50.0)
-    adx = float(latest.get("adx", 0.0) or 0.0)
+    try:
+        ema_fast = float(latest.get("ema_fast"))
+        ema_slow = float(latest.get("ema_slow"))
+        rsi = float(latest.get("rsi"))
+        adx = float(latest.get("adx"))
+    except (TypeError, ValueError):
+        return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "invalid 1H features")
+
     slope = 0.0
     if len(frame) >= 2:
-        slope = float(frame["ema_fast"].iloc[-1] - frame["ema_fast"].iloc[-2])
+        try:
+            prev_fast = float(frame["ema_fast"].iloc[-2])
+            slope = float(ema_fast - prev_fast)
+        except (TypeError, ValueError):
+            return HigherTimeframeGate(False, False, False, False, "unknown", "no_trade", "invalid 1H features")
 
     long_ok = ema_fast > ema_slow and slope > 0 and rsi >= 52.0
     long_breakout_ok = long_ok and adx >= 18.0
@@ -40,4 +61,3 @@ def evaluate_higher_timeframe_gate(features_map: Optional[Dict[str, pd.DataFrame
     if short_ok:
         return HigherTimeframeGate(False, True, False, True, "bearish", "allow_short", "1H bearish")
     return HigherTimeframeGate(False, False, False, False, "mixed", "no_trade", "1H mixed")
-

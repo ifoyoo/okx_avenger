@@ -65,3 +65,25 @@ def test_evaluate_higher_timeframe_gate_blocks_shorts_without_adx_confirmation()
     assert gate.reason_code == "no_trade"
     assert gate_confirmed.allow_short is True
     assert gate_confirmed.allow_long is False
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_are_empty() -> None:
+    gate = evaluate_higher_timeframe_gate({"1H": pd.DataFrame()})
+
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
+
+
+def test_evaluate_higher_timeframe_gate_fails_closed_when_1h_features_missing_required_columns() -> None:
+    frame = pd.DataFrame(
+        [
+            {"close": 100.0, "ema_slow": 101.0, "rsi": 40.0, "adx": 25.0},
+            {"close": 99.0, "ema_slow": 101.0, "rsi": 40.0, "adx": 25.0},
+        ]
+    )
+    gate = evaluate_higher_timeframe_gate({"1H": frame})
+
+    assert gate.allow_long is False
+    assert gate.allow_short is False
+    assert gate.reason_code == "no_trade"
