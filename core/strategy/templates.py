@@ -23,32 +23,28 @@ def evaluate_entry_template(*, gate: HigherTimeframeGate, features: pd.DataFrame
 
     latest = features.iloc[-1]
     prev = features.iloc[-2] if len(features) >= 2 else latest
-    prev2 = features.iloc[-3] if len(features) >= 3 else prev
 
     close = float(latest.get("close", 0.0) or 0.0)
     ema_fast = float(latest.get("ema_fast", 0.0) or 0.0)
     ema_slow = float(latest.get("ema_slow", 0.0) or 0.0)
     volume = float(latest.get("volume", 0.0) or 0.0)
     prev_volume = float(prev.get("volume", volume) or volume)
-    prev2_volume = float(prev2.get("volume", prev_volume) or prev_volume)
     rsi = float(latest.get("rsi", 50.0) or 50.0)
     prev_high = float(prev.get("high", close) or close)
     prev_low = float(prev.get("low", close) or close)
 
-    near_fast = abs(close - ema_fast) / max(abs(ema_fast), 1e-9) <= 0.004
-    volume_soft = volume <= max(prev_volume, prev2_volume)
+    near_fast = abs(close - ema_fast) / max(ema_fast, 1e-9) <= 0.004
 
-    if gate.allow_long and ema_fast >= ema_slow and near_fast and volume_soft and 45.0 <= rsi <= 62.0:
+    if gate.allow_long and ema_fast >= ema_slow and near_fast and volume <= prev_volume and 45.0 <= rsi <= 62.0:
         return EntryTemplateMatch("pullback_long", SignalAction.BUY, 0.58, f"close>{ema_fast:.4f} reclaim over pullback")
 
     if gate.allow_breakout_long and close > prev_high and volume > prev_volume * 1.2 and rsi < 68.0:
         return EntryTemplateMatch("breakout_long", SignalAction.BUY, 0.64, "range break with volume")
 
-    if gate.allow_short and ema_fast <= ema_slow and near_fast and volume_soft and rsi <= 52.0:
+    if gate.allow_short and ema_fast <= ema_slow and near_fast and volume <= prev_volume and rsi <= 52.0:
         return EntryTemplateMatch("pullback_short", SignalAction.SELL, 0.58, "failed reclaim into trend")
 
     if gate.allow_breakdown_short and close < prev_low and volume > prev_volume * 1.2 and rsi > 30.0:
         return EntryTemplateMatch("breakdown_short", SignalAction.SELL, 0.64, "range breakdown with volume")
 
     return None
-
