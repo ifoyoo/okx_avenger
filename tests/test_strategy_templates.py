@@ -88,3 +88,41 @@ def test_pullback_long_proximity_denominator_uses_raw_ema_fast_not_abs() -> None
     match = evaluate_entry_template(gate=gate, features=features)
 
     assert match is None
+
+
+def test_evaluate_entry_template_returns_none_on_missing_required_columns() -> None:
+    gate = HigherTimeframeGate(True, False, True, False, "bullish", "allow_long", "1H bullish")
+
+    # Missing rsi column; without a strict required-columns guard this could match pullback_long.
+    features = pd.DataFrame(
+        [
+            {"close": 100.0, "ema_fast": 99.6, "ema_slow": 99.2, "volume": 1000.0, "high": 100.2, "low": 99.4},
+            {"close": 99.7, "ema_fast": 99.7, "ema_slow": 99.3, "volume": 880.0, "high": 99.9, "low": 99.5},
+            {"close": 100.1, "ema_fast": 99.9, "ema_slow": 99.4, "volume": 870.0, "high": 100.3, "low": 99.8},
+        ]
+    )
+
+    match = evaluate_entry_template(gate=gate, features=features)
+
+    assert match is None
+
+
+def test_evaluate_entry_template_returns_none_on_non_numeric_feature_value() -> None:
+    gate = HigherTimeframeGate(True, False, True, False, "bullish", "allow_long", "1H bullish")
+
+    features = pd.DataFrame(
+        [
+            {"close": 100.0, "ema_fast": 99.6, "ema_slow": 99.2, "volume": 1000.0, "rsi": 54.0, "high": 100.2, "low": 99.4},
+            {"close": 99.7, "ema_fast": 99.7, "ema_slow": 99.3, "volume": 880.0, "rsi": 50.0, "high": 99.9, "low": 99.5},
+            # Malformed ema_fast should not raise; it should return None.
+            {"close": 100.1, "ema_fast": "bad", "ema_slow": 99.4, "volume": 870.0, "rsi": 56.0, "high": 100.3, "low": 99.8},
+        ]
+    )
+
+    match = evaluate_entry_template(gate=gate, features=features)
+
+    assert match is None
+
+
+def test_templates_are_exported_via_strategy_package() -> None:
+    from core.strategy import EntryTemplateMatch, evaluate_entry_template  # noqa: F401
