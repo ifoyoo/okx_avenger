@@ -1,14 +1,26 @@
 [
   {
     "inst_id": "PUMP-USDT-SWAP",
-    "max_position": 0.04
+    "max_position": 1000
   },
   {
     "inst_id": "WLFI-USDT-SWAP",
-    "max_position": 0.035
+    "max_position": 10
   },
   {
     "inst_id": "DOGE-USDT-SWAP",
-    "max_position": 0.03
+    "max_position": 10
+  },
+  {
+    "inst_id": "SOL-USDT-SWAP",
+    "max_position": 0.05
+  },
+  {
+    "inst_id": "XRP-USDT-SWAP",
+    "max_position": 1
+  },
+  {
+    "inst_id": "SUI-USDT-SWAP",
+    "max_position": 1
   }
 ]
