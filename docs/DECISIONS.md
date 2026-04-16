@@ -4,6 +4,16 @@
 
 ## 决策日志（最新在上）
 
+### 2026-04-16 - D0027 - Telegram 通知收口为 critical-only 告警
+- 背景：当前通知虽然只有四类事件，但 `order_submitted` 仍会在真实运行中推送，导致手机端持续收到“已提交/已成交”类噪声；这与用户当前把 Telegram 当成告警通道的使用方式不一致。
+- 决策：
+  - runtime 链路不再发布 `order_submitted` 事件。
+  - `NOTIFY_LEVEL` 的 `critical` / `orders` / `all` 统一归一到 `critical`，只保留异常、阻断、失败三类告警。
+  - 成功下单信息继续保留在 runtime 日志与执行结果中，不再进入 Telegram。
+- 原因：成功播报不是必须处理的事件；对手机通知来说，低噪声比“全知道”更重要。只保留需要介入的消息，才符合 summary-first 的输出目标。
+- 影响：Telegram 将只在 `runtime_error` / `trade_blocked` / `order_failed` 时触发；旧配置里的 `orders` / `all` 不会报错，但行为将与 `critical` 一致；README 与交接文档同步改为告警语义。
+- 回滚方案：若未来确实需要恢复成功下单播报，应单独引入明确的 success-level 配置，而不是重新让 `orders` / `all` 挂着历史包袱工作。
+
 ### 2026-04-12 - D0026 - live pending limit 单视为“已提交”，并对同标的增加重复下单闸门
 - 背景：真实运行日志显示 `PUMP-USDT-SWAP` / `WLFI-USDT-SWAP` 的限价单已被 OKX 接受并挂出，但执行对账只检查“是否立即出现持仓”，导致结果被误记为 `PENDING_TIMEOUT`；同时系统没有针对“该标的已存在未成交委托”的重复下单保护。
 - 决策：

@@ -3,7 +3,7 @@
 > 用途：记录“当前做到哪一步”，供新线程快速恢复。
 
 ## 元信息
-- 最后更新时间：2026-04-12
+- 最后更新时间：2026-04-16
 - 当前主线：按 `docs/NODES.md` 推进
 - 当前批次：四阶段策略/分析质量提升已完成；watchlist 已收口为 manual-only；TP/SL / 通知 / release hardening 已收口；上线前 smoke 期间补上执行对账与重复下单闸门
 - 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐；CLI/runtime/通知/backtest 输出已统一为 summary-first 契约；live pending limit 单不会再被误判为失败，且同标的存在未成交委托时会阻断重复下单
@@ -29,6 +29,26 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-16
+- 节点：通知收口 - Telegram critical-only alerts
+- 目标：把 Telegram 从运行结果播报收口成真正的告警通道，只保留需要人工处理的消息。
+- 结果：完成。`run_runtime_cycle()` 不再在成功下单或 `PENDING_LIVE` 时发送 `order_submitted`；`NotificationSettings` 与 `NotificationCenter` 会把 `critical/orders/all` 统一归一到 `critical`；README 和交接文档已同步改为“异常/阻断/失败”三类告警语义。
+- 变更文件：
+  - `cli_app/runtime_execution.py`
+  - `config/settings.py`
+  - `core/utils/notifications.py`
+  - `tests/test_notifications.py`
+  - `tests/test_cli_runtime_cycle.py`
+  - `tests/test_settings_validation.py`
+  - `README.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+  - `docs/superpowers/specs/2026-04-16-notification-critical-only-design.md`
+  - `docs/superpowers/plans/2026-04-16-notification-critical-only.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_notifications.py tests/test_cli_runtime_cycle.py tests/test_settings_validation.py` -> `29 passed`
+
 - 时间：2026-04-12
 - 节点：执行对账修复 - live pending order reconcile
 - 目标：修复真实运行中“OKX 已接受限价单，但系统因未立即观察到持仓而把结果记成 `PENDING_TIMEOUT`”的问题，并防止同标的在已有未成交委托时继续重复下单。
@@ -114,7 +134,7 @@
 - 时间：2026-04-12
 - 节点：通知模块重构 - runtime notification center
 - 目标：把悬空的 Telegram 通知代码收口到当前真实运行链路，统一异常/阻断/下单结果的通知语义。
-- 结果：完成。`NotificationCenter` 现统一处理级别过滤、冷却与事件渲染；`build_runtime()` 会真实构建通知中心；`run_runtime_cycle()` 会在 per-inst 失败、阻断、真实下单成功/失败时发通知；`run_runtime_once()/run_runtime_loop()` 会在顶层运行异常时补发 `runtime_error`。`config-check` 现在也会显示 `notify_enabled/notify_level`。
+- 结果：完成。`NotificationCenter` 现统一处理级别过滤、冷却与事件渲染；`build_runtime()` 会真实构建通知中心；当时 `run_runtime_cycle()` 会在 per-inst 失败、阻断、真实下单成功/失败时发通知；`run_runtime_once()/run_runtime_loop()` 会在顶层运行异常时补发 `runtime_error`。随后 2026-04-16 已进一步把成功下单通知收口为 critical-only 告警语义。
 - 变更文件：
   - `core/utils/notifications.py`
   - `core/utils/__init__.py`

@@ -88,9 +88,9 @@ class NotificationCenter:
     @staticmethod
     def normalize_level(level: object) -> str:
         normalized = str(level or "critical").strip().lower()
-        if normalized not in {"critical", "orders", "all"}:
+        if normalized in {"critical", "orders", "all"}:
             return "critical"
-        return normalized
+        return "critical"
 
     def publish(self, event: NotificationEvent) -> bool:
         if self.transport is None:
@@ -149,11 +149,7 @@ class NotificationCenter:
 
     def _level_allows(self, kind: str) -> bool:
         critical = {"runtime_error", "trade_blocked", "order_failed"}
-        if self.level == "critical":
-            return kind in critical
-        if self.level in {"orders", "all"}:
-            return kind in critical | {"order_submitted"}
-        return False
+        return kind in critical
 
     def _consume_cooldown(self, key: Tuple[str, str]) -> bool:
         if self.cooldown_seconds <= 0:

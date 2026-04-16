@@ -92,7 +92,7 @@ EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=1.35
 NOTIFY_ENABLED=true
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
-NOTIFY_LEVEL=orders
+NOTIFY_LEVEL=critical
 
 LLM_ENABLED=true
 LLM_PROVIDER=openai_compatible
@@ -107,6 +107,7 @@ LLM_MAX_TOKENS=4096
 - `0.20` 表示持仓收益率到 `+20%` 平仓
 - `0.10` 表示持仓收益率到 `-10%` 平仓
 - 运行时会按当前杠杆换算成交易所触发价
+- Telegram 现在只推送异常、阻断、下单失败，不再播报成功下单
 - 同标的 live 未成交挂单超过 `EXECUTION_PENDING_ORDER_TTL_MINUTES=45` 后会先撤单，但本轮仍阻塞，下一轮再重新评估
 - 开启 `EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN=true` 后，允许同方向加仓；`EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=3.0` 表示同向总仓位最多放大到 `max_position` 的 3 倍
 

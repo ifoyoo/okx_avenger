@@ -364,13 +364,10 @@ def test_run_runtime_cycle_returns_one_when_some_orders_fail(monkeypatch) -> Non
     monkeypatch.setattr(runtime_execution, "logger", _Logger())
 
     assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 1
-    assert len(bundle.notifier.events) == 2
-    assert bundle.notifier.events[0].kind == "order_submitted"
-    assert bundle.notifier.events[1].kind == "order_failed"
-    assert bundle.notifier.events[0].action == "BUY"
-    assert bundle.notifier.events[0].confidence == 0.82
-    assert bundle.notifier.events[1].code == "51000"
-    assert bundle.notifier.events[1].detail == "rejected"
+    assert len(bundle.notifier.events) == 1
+    assert bundle.notifier.events[0].kind == "order_failed"
+    assert bundle.notifier.events[0].code == "51000"
+    assert bundle.notifier.events[0].detail == "rejected"
     assert info_calls[0] == ("cycle start total=2 dry_run=False", ())
     assert info_calls[-1] == ("cycle summary total=2 completed=1 blocked=0 hold=0 failed=1", ())
 
@@ -446,7 +443,7 @@ def test_run_runtime_cycle_sends_blocked_notification() -> None:
     assert bundle.notifier.events[0].detail == "reason=risk blocked"
 
 
-def test_run_runtime_cycle_sends_order_submitted_notification() -> None:
+def test_run_runtime_cycle_does_not_send_success_notification() -> None:
     runtime_execution = _load_runtime_execution()
     bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}])
 
@@ -479,10 +476,7 @@ def test_run_runtime_cycle_sends_order_submitted_notification() -> None:
     bundle.engine.run_once = _success_run_once
 
     assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
-    assert len(bundle.notifier.events) == 1
-    assert bundle.notifier.events[0].kind == "order_submitted"
-    assert bundle.notifier.events[0].action == "BUY"
-    assert bundle.notifier.events[0].size == 0.1
+    assert bundle.notifier.events == []
 
 
 def test_run_runtime_cycle_registers_and_enforces_position_lifecycle_after_success() -> None:
@@ -616,5 +610,4 @@ def test_run_runtime_cycle_does_not_enforce_protection_or_lifecycle_before_fill(
     assert monitor.enforced == 0
     assert lifecycle_manager.registered == []
     assert lifecycle_manager.enforced == 0
-    assert len(bundle.notifier.events) == 1
-    assert bundle.notifier.events[0].kind == "order_submitted"
+    assert bundle.notifier.events == []

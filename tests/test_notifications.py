@@ -45,6 +45,33 @@ def test_notification_center_filters_events_by_level() -> None:
     ]
 
 
+def test_notification_center_treats_orders_level_as_critical_only() -> None:
+    transport = _Transport()
+    center = NotificationCenter(transport=transport, level="orders", cooldown_seconds=60.0)
+
+    center.publish(
+        NotificationEvent(
+            kind="order_submitted",
+            inst_id="BTC-USDT-SWAP",
+            timeframe="5m",
+            action="BUY",
+            confidence=0.82,
+            size=0.1,
+        )
+    )
+    center.publish(
+        NotificationEvent(
+            kind="order_failed",
+            inst_id="BTC-USDT-SWAP",
+            detail="rejected",
+        )
+    )
+
+    assert [item[0] for item in transport.messages] == [
+        "[ORDER FAILED]\nBTC-USDT-SWAP\nrejected",
+    ]
+
+
 def test_notification_center_applies_cooldown_per_event_and_inst() -> None:
     transport = _Transport()
     center = NotificationCenter(transport=transport, level="orders", cooldown_seconds=60.0)

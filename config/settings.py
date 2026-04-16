@@ -156,7 +156,7 @@ class NotificationSettings(SettingsBase):
     @classmethod
     def _normalize_notification_level(cls, value: Optional[str]) -> str:
         level = str(value or "critical").strip().lower()
-        if level not in {"critical", "orders", "all"}:
+        if level in {"critical", "orders", "all"}:
             return "critical"
         return level
 

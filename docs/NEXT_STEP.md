@@ -3,7 +3,7 @@
 > 用途：保证“下一步只有一个目标”，降低上下文和执行漂移。
 
 ## 元信息
-- 最后更新时间：2026-04-12
+- 最后更新时间：2026-04-16
 - 负责人：Codex
 
 ## 下一步唯一目标
@@ -24,7 +24,7 @@
 1. `./okx config-check --api-check` 通过，且没有新增未知 `.env` 键。
 2. `./okx once --dry-run` / `./okx run --dry-run` 的 `cycle start / inst result / cycle summary` 输出与实际单标的行为一致。
 3. 账户中不存在上一次误判遗留的 live pending 普通委托，或至少这些委托已被人工确认并与本轮运行隔离。
-4. Telegram 只在异常/阻断/下单结果上触发，不再出现悬空通知。
+4. Telegram 只在异常/阻断/下单失败上触发，不再播报成功下单，也不再出现悬空通知。
 5. 同一套 `protection` 配置在策略说明、执行 attach-algo、回测退出结果上保持一致。
 6. `config-check` / `status` / backtest report 的 summary-first 输出没有出现信息丢失或误导。
 7. 如有参数调整，全量测试仍保持通过，三文件持续同步更新。

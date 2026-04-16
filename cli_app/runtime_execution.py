@@ -127,16 +127,6 @@ def _publish_runtime_result(
         return
     success = bool(getattr(execution_report, "success", False))
     if success:
-        notifier.publish(
-            NotificationEvent(
-                kind="order_submitted",
-                inst_id=inst_id,
-                timeframe=timeframe,
-                action=signal.action.value.upper(),
-                confidence=signal.confidence,
-                size=signal.size,
-            )
-        )
         return
     error_text = str(getattr(execution_report, "error", "") or "")
     code_text = str(getattr(execution_report, "code", "") or "")

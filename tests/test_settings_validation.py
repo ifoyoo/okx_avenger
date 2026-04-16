@@ -102,7 +102,7 @@ def test_settings_defaults_match_redesign(monkeypatch) -> None:
 def test_notification_settings_normalize_level() -> None:
     settings = NotificationSettings(NOTIFY_LEVEL="ORDERS")
 
-    assert settings.level == "orders"
+    assert settings.level == "critical"
 
 
 def test_build_and_dump_config_snapshot(tmp_path) -> None:
