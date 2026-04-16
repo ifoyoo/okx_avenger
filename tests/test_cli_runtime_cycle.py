@@ -47,6 +47,20 @@ class _FakeEngine:
         self.calls.append(kwargs)
         if kwargs["inst_id"] in self.failing_inst_ids:
             raise RuntimeError(f"boom:{kwargs['inst_id']}")
+        execution = {
+            "plan": ExecutionPlan(
+                inst_id=kwargs["inst_id"],
+                action=SignalAction.BUY,
+                td_mode="cross",
+                pos_side="long",
+                order_type="limit",
+                size=0.1,
+                price=None,
+                est_slippage=0.001,
+            )
+        }
+        if not bool(kwargs.get("dry_run")):
+            execution["report"] = SimpleNamespace(success=True, response={"ordId": "1"}, error=None, code=None)
         return {
             "signal": TradeSignal(
                 action=SignalAction.BUY,
@@ -54,18 +68,8 @@ class _FakeEngine:
                 reason="test",
                 size=0.1,
             ),
-            "execution": {
-                "plan": ExecutionPlan(
-                    inst_id=kwargs["inst_id"],
-                    action=SignalAction.BUY,
-                    td_mode="cross",
-                    pos_side="long",
-                    order_type="limit",
-                    size=0.1,
-                    price=None,
-                    est_slippage=0.001,
-                )
-            },
+            "execution": execution,
+            "order": {"ordId": "1"} if not bool(kwargs.get("dry_run")) else None,
         }
 
 
@@ -106,13 +110,26 @@ class _FakeProtectionMonitor:
         self.enforced += 1
 
 
-def _make_bundle(entries, *, failing_inst_ids=(), protection_monitor=None):
+class _FakePositionLifecycleManager:
+    def __init__(self):
+        self.registered = []
+        self.enforced = 0
+
+    def register_plan(self, **kwargs):
+        self.registered.append(kwargs)
+
+    def enforce(self):
+        self.enforced += 1
+
+
+def _make_bundle(entries, *, failing_inst_ids=(), protection_monitor=None, position_lifecycle_manager=None):
     return SimpleNamespace(
         engine=_FakeEngine(failing_inst_ids=failing_inst_ids),
         notifier=_FakeNotifier(),
         perf_tracker=_FakePerfTracker(),
         watchlist_manager=_FakeWatchlistManager(entries),
         protection_monitor=protection_monitor,
+        position_lifecycle_manager=position_lifecycle_manager,
         settings=SimpleNamespace(
             strategy=SimpleNamespace(
                 default_take_profit_upl_ratio=0.06,
@@ -178,6 +195,57 @@ def test_run_runtime_cycle_executes_single_entry() -> None:
     assert call["perf_stats"] == {"trades": 3}
     assert call["daily_stats"] == {"trades": 1}
     assert call["protection_overrides"] == {"take_profit": {"mode": "ratio", "value": 0.03}}
+
+
+def test_run_runtime_cycle_refreshes_account_snapshot_for_each_entry(monkeypatch) -> None:
+    runtime_execution = _load_runtime_execution()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}, {"inst_id": "ETH-USDT-SWAP"}])
+    snapshots = iter(
+        [
+            {"equity": 1000.0, "available": 250.0},
+            {"equity": 1000.0, "available": 180.0},
+            {"equity": 1000.0, "available": 120.0},
+        ]
+    )
+    monkeypatch.setattr(runtime_execution, "_safe_account_snapshot", lambda engine: next(snapshots))
+
+    runtime_execution.run_runtime_cycle(bundle, _make_args())
+
+    assert bundle.engine.calls[0]["account_snapshot"] == {"equity": 1000.0, "available": 180.0}
+    assert bundle.engine.calls[1]["account_snapshot"] == {"equity": 1000.0, "available": 120.0}
+
+
+def test_run_runtime_cycle_skips_live_execution_when_refresh_snapshot_fails(monkeypatch) -> None:
+    runtime_execution = _load_runtime_execution()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}])
+    snapshots = iter(
+        [
+            {"equity": 1000.0, "available": 250.0},
+            {},
+        ]
+    )
+    monkeypatch.setattr(runtime_execution, "_safe_account_snapshot", lambda engine: next(snapshots))
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
+    assert bundle.engine.calls == []
+    assert bundle.notifier.events[0].kind == "runtime_error"
+
+
+def test_run_runtime_cycle_uses_initial_snapshot_in_dry_run_when_refresh_snapshot_fails(monkeypatch) -> None:
+    runtime_execution = _load_runtime_execution()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}])
+    snapshots = iter(
+        [
+            {"equity": 1000.0, "available": 250.0},
+            {},
+        ]
+    )
+    monkeypatch.setattr(runtime_execution, "_safe_account_snapshot", lambda engine: next(snapshots))
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=True)) == 0
+
+    assert bundle.engine.calls[0]["account_snapshot"] == {"equity": 1000.0, "available": 250.0}
+    assert bundle.notifier.events == []
 
 
 def test_run_runtime_cycle_disables_exchange_attached_protection_when_monitor_present() -> None:
@@ -415,3 +483,138 @@ def test_run_runtime_cycle_sends_order_submitted_notification() -> None:
     assert bundle.notifier.events[0].kind == "order_submitted"
     assert bundle.notifier.events[0].action == "BUY"
     assert bundle.notifier.events[0].size == 0.1
+
+
+def test_run_runtime_cycle_registers_and_enforces_position_lifecycle_after_success() -> None:
+    runtime_execution = _load_runtime_execution()
+    lifecycle_manager = _FakePositionLifecycleManager()
+    bundle = _make_bundle(
+        [{"inst_id": "BTC-USDT-SWAP"}],
+        position_lifecycle_manager=lifecycle_manager,
+    )
+
+    def _success_run_once(**kwargs):
+        bundle.engine.calls.append(kwargs)
+        return {
+            "signal": TradeSignal(
+                action=SignalAction.BUY,
+                confidence=0.82,
+                reason="submitted",
+                size=0.1,
+            ),
+            "execution": {
+                "plan": ExecutionPlan(
+                    inst_id=kwargs["inst_id"],
+                    action=SignalAction.BUY,
+                    td_mode="cross",
+                    pos_side="long",
+                    order_type="limit",
+                    size=0.1,
+                    price=99.8,
+                    est_slippage=0.01,
+                    latest_price=100.0,
+                    blocked=False,
+                ),
+                "report": SimpleNamespace(success=True, error=None, code=None),
+            },
+            "order": {"code": "0"},
+        }
+
+    bundle.engine.run_once = _success_run_once
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
+
+    assert len(lifecycle_manager.registered) == 1
+    assert lifecycle_manager.registered[0]["inst_id"] == "BTC-USDT-SWAP"
+    assert lifecycle_manager.registered[0]["pos_side"] == "long"
+    assert lifecycle_manager.registered[0]["size"] == 0.1
+    assert lifecycle_manager.enforced == 1
+
+
+def test_run_runtime_cycle_enforces_protection_immediately_after_successful_fill() -> None:
+    runtime_execution = _load_runtime_execution()
+    monitor = _FakeProtectionMonitor()
+    bundle = _make_bundle([{"inst_id": "BTC-USDT-SWAP"}], protection_monitor=monitor)
+
+    def _run_once(**kwargs):
+        bundle.engine.calls.append(kwargs)
+        return {
+            "signal": TradeSignal(
+                action=SignalAction.BUY,
+                confidence=0.82,
+                reason="test",
+                size=0.1,
+            ),
+            "execution": {
+                "plan": ExecutionPlan(
+                    inst_id=kwargs["inst_id"],
+                    action=SignalAction.BUY,
+                    td_mode="cross",
+                    pos_side="long",
+                    order_type="limit",
+                    size=0.1,
+                    price=None,
+                    est_slippage=0.001,
+                ),
+                "report": SimpleNamespace(success=True, response={"ordId": "1"}, error=None, code=None),
+            },
+            "order": {"ordId": "1"},
+        }
+
+    bundle.engine.run_once = _run_once
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
+    assert monitor.enforced == 1
+
+
+def test_run_runtime_cycle_does_not_enforce_protection_or_lifecycle_before_fill() -> None:
+    runtime_execution = _load_runtime_execution()
+    monitor = _FakeProtectionMonitor()
+    lifecycle_manager = _FakePositionLifecycleManager()
+    bundle = _make_bundle(
+        [{"inst_id": "BTC-USDT-SWAP"}],
+        protection_monitor=monitor,
+        position_lifecycle_manager=lifecycle_manager,
+    )
+
+    def _run_once(**kwargs):
+        bundle.engine.calls.append(kwargs)
+        return {
+            "signal": TradeSignal(
+                action=SignalAction.BUY,
+                confidence=0.82,
+                reason="pending",
+                size=0.1,
+            ),
+            "execution": {
+                "plan": ExecutionPlan(
+                    inst_id=kwargs["inst_id"],
+                    action=SignalAction.BUY,
+                    td_mode="cross",
+                    pos_side="long",
+                    order_type="limit",
+                    size=0.1,
+                    price=99.8,
+                    est_slippage=0.01,
+                    latest_price=100.0,
+                    blocked=False,
+                ),
+                "report": SimpleNamespace(
+                    success=True,
+                    filled=False,
+                    response={"ordId": "1"},
+                    error=None,
+                    code="PENDING_LIVE",
+                ),
+            },
+            "order": {"ordId": "1"},
+        }
+
+    bundle.engine.run_once = _run_once
+
+    assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=False)) == 0
+    assert monitor.enforced == 0
+    assert lifecycle_manager.registered == []
+    assert lifecycle_manager.enforced == 0
+    assert len(bundle.notifier.events) == 1
+    assert bundle.notifier.events[0].kind == "order_submitted"

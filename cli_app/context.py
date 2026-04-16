@@ -12,6 +12,7 @@ from core.client import OKXClient
 from core.data.performance import PerformanceTracker
 from core.data.watchlist_loader import WatchlistManager
 from core.engine import ProtectionOrderManager, ProtectionThresholds
+from core.engine.position_lifecycle import PositionLifecycleManager
 from core.engine.trading import TradingEngine
 from core.strategy.core import Strategy
 from core.utils import NotificationCenter, build_notification_center
@@ -26,12 +27,19 @@ class RuntimeBundle:
     perf_tracker: PerformanceTracker
     notifier: NotificationCenter | None
     protection_monitor: ProtectionOrderManager | None = None
+    position_lifecycle_manager: PositionLifecycleManager | None = None
 
     def close(self) -> None:
         monitor = getattr(self, "protection_monitor", None)
         if monitor is not None:
             try:
                 monitor.stop()
+            except Exception:
+                pass
+        lifecycle_manager = getattr(self, "position_lifecycle_manager", None)
+        if lifecycle_manager is not None:
+            try:
+                lifecycle_manager.stop()
             except Exception:
                 pass
         try:
@@ -87,6 +95,11 @@ def build_runtime() -> RuntimeBundle:
         level=settings.notification.level,
         cooldown_seconds=settings.notification.cooldown_seconds,
     )
+    lifecycle_state_path = Path(
+        getattr(settings.runtime, "position_lifecycle_state_path", "data/position_lifecycle_state.json")
+        or "data/position_lifecycle_state.json"
+    )
+    position_lifecycle_manager = PositionLifecycleManager(okx_client=okx, state_path=lifecycle_state_path)
     return RuntimeBundle(
         settings=settings,
         okx=okx,
@@ -95,4 +108,5 @@ def build_runtime() -> RuntimeBundle:
         perf_tracker=perf_tracker,
         notifier=notifier,
         protection_monitor=protection_monitor,
+        position_lifecycle_manager=position_lifecycle_manager,
     )

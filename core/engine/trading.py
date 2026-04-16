@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+import math
 import time
 import uuid
 
@@ -1233,24 +1234,46 @@ class TradingEngine:
         signal: TradeSignal,
     ) -> None:
         try:
-            ts_value = features.iloc[-1].get("ts", "")
+            latest = features.iloc[-1] if getattr(features, "empty", True) is False else {}
+            ts_value = latest.get("ts", "") if hasattr(latest, "get") else ""
             timestamp = str(ts_value)
-            close_price = float(features.iloc[-1].get("close", 0.0) or 0.0)
-            analysis_view = strategy_output.analysis_view
+            close_price = self._safe_float(latest.get("close", 0.0) if hasattr(latest, "get") else 0.0)
+            analysis_view = getattr(strategy_output, "analysis_view", None)
+            entry_template = getattr(strategy_output, "entry_template", None)
+            gated_action = (
+                self._action_value(entry_template.action, default="hold")
+                if entry_template is not None and getattr(entry_template, "action", None) is not None
+                else "hold"
+            )
             record = DecisionRecord(
                 timestamp=timestamp,
                 inst_id=inst_id,
                 timeframe=timeframe,
-                analysis_action=analysis_view.action.value,
-                analysis_confidence=analysis_view.confidence,
-                analysis_reason=analysis_view.reason,
-                strategy_action=signal.action.value,
+                analysis_action=self._action_value(getattr(analysis_view, "action", "hold"), default="hold"),
+                gated_action=gated_action,
+                final_strategy_action=self._action_value(signal.action, default="hold"),
+                analysis_confidence=self._safe_float(getattr(analysis_view, "confidence", 0.0)),
+                analysis_reason=str(getattr(analysis_view, "reason", "") or ""),
                 close_price=close_price,
                 trace_id=trace_id,
             )
             self.decision_logger.log(record)
         except Exception as exc:  # pragma: no cover
             logger.warning(f"记录决策失败: {exc}")
+
+    @staticmethod
+    def _action_value(action: Any, default: str = "hold") -> str:
+        value = getattr(action, "value", action)
+        text = str(value or "").strip().lower()
+        return text or default
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            parsed = float(value or 0.0)
+        except (TypeError, ValueError):
+            return default
+        return parsed if math.isfinite(parsed) else default
 
     @staticmethod
     def _to_account_state(snapshot: Dict[str, float]) -> AccountState:

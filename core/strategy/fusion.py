@@ -232,18 +232,34 @@ class SignalFusionEngine:
         base_action = seeded_action
         base_conf = float(seeded_confidence or 0.0) if seeded_confidence is not None else 0.0
         notes: List[str] = []
-        if indicator and indicator.action == seeded_action and indicator.note not in REVERSAL_ONLY_INDICATOR_NOTES:
-            base_conf = max(base_conf, float(indicator.confidence or 0.0))
-        if higher_tf and higher_tf.action != SignalAction.HOLD:
-            if higher_tf.action == base_action:
-                base_conf = min(1.0, base_conf + 0.15 * max(0.5, higher_tf.confidence))
-            else:
-                base_conf = max(0.2, base_conf - 0.2 * max(0.5, higher_tf.confidence))
+        terminal_veto = False
+        if indicator and indicator.note not in REVERSAL_ONLY_INDICATOR_NOTES:
+            if indicator.action == seeded_action:
+                base_conf = max(base_conf, float(indicator.confidence or 0.0))
+            elif (
+                seeded_action in {SignalAction.BUY, SignalAction.SELL}
+                and indicator.action in {SignalAction.BUY, SignalAction.SELL}
+                and indicator.action != seeded_action
+            ):
+                ind_conf = max(0.0, min(1.0, float(indicator.confidence or 0.0)))
+                # Strong indicator disagreement vetoes the seeded template to HOLD.
+                if ind_conf >= max(0.7, base_conf + 0.05):
+                    base_action = SignalAction.HOLD
+                    base_conf = min(base_conf, 0.35)
+                    notes.append("模板过滤：指标与模板方向冲突，降级为 HOLD。")
+                    terminal_veto = True
+                else:
+                    base_conf = max(0.2, base_conf - 0.15 * max(0.3, ind_conf))
+                    notes.append("模板警告：指标与模板方向冲突，已降低置信度。")
+        if higher_tf and higher_tf.note:
+            # Legacy higher-timeframe bias is informational only; the 1H gate/template is authoritative.
             notes.append(f"多周期：{higher_tf.note}")
         for support in objective_signals:
             if support.name not in self.SUPPORTIVE_NAMES or support.action == SignalAction.HOLD:
                 continue
             if support.name in CONFIRMATION_ONLY_PLUGINS:
+                continue
+            if terminal_veto:
                 continue
             if base_action == SignalAction.HOLD and not allow_support_promotion:
                 continue
@@ -265,13 +281,16 @@ class SignalFusionEngine:
             else:
                 base_conf = max(0.2, base_conf - 0.1 * max(0.3, support.confidence))
             notes.append(f"{label}：{support.note}")
-        action, confidence, guard_note = self._combine_actions(
-            base_action,
-            base_conf,
-            analysis_view.action,
-            analysis_view.confidence,
-            llm_guard=llm_guard,
-        )
+        if terminal_veto:
+            action, confidence, guard_note = SignalAction.HOLD, max(0.2, base_conf), None
+        else:
+            action, confidence, guard_note = self._combine_actions(
+                base_action,
+                base_conf,
+                analysis_view.action,
+                analysis_view.confidence,
+                llm_guard=llm_guard,
+            )
         if guard_note:
             notes.append(guard_note)
         action, confidence, arbitration_note = self._apply_conflict_arbitration(

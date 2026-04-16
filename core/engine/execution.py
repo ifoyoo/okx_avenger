@@ -56,6 +56,7 @@ class ExecutionPlan:
 class ExecutionReport:
     plan: ExecutionPlan
     success: bool
+    filled: bool = False
     response: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     code: Optional[str] = None
@@ -143,6 +144,10 @@ class ExecutionEngine:
                 entry_price=entry_reference,
                 leverage=leverage,
             )
+        if signal.protection and resolved_protection is None and not blocked:
+            blocked = True
+            block_reason = "保护参数无法解析，取消无保护下单。"
+            notes.append(block_reason)
         if resolved_protection and not blocked:
             notes.append("附带止盈/止损保护。")
         if min_contract_note and not blocked:
@@ -264,7 +269,7 @@ class ExecutionEngine:
         if plan.blocked or plan.size <= 0:
             reason = plan.block_reason or "执行计划被拦截。"
             logger.info(f"Execution plan blocked inst={plan.inst_id} reason={reason}")
-            return ExecutionReport(plan=plan, success=False, error=reason)
+            return ExecutionReport(plan=plan, success=False, filled=False, error=reason)
         cl_ord_id = plan.cl_ord_id or self._build_cl_ord_id(
             inst_id=plan.inst_id,
             action=plan.action,
@@ -296,7 +301,7 @@ class ExecutionEngine:
             )
         except Exception as exc:  # pragma: no cover
             logger.exception(f"执行下单异常 inst={plan.inst_id} err={exc}")
-            return ExecutionReport(plan=plan, success=False, error=str(exc))
+            return ExecutionReport(plan=plan, success=False, filled=False, error=str(exc))
         if resp.get("error"):
             error_info = resp["error"]
             logger.error(
@@ -308,6 +313,7 @@ class ExecutionEngine:
             return ExecutionReport(
                 plan=plan,
                 success=False,
+                filled=False,
                 response=resp,
                 error=str(error_info.get("message") or ""),
                 code=str(error_info.get("code") or ""),
@@ -324,15 +330,23 @@ class ExecutionEngine:
                             cl_ord_id,
                             plan.order_type,
                         )
-                        return ExecutionReport(plan=plan, success=True, response=resp)
+                        return ExecutionReport(
+                            plan=plan,
+                            success=True,
+                            filled=False,
+                            response=resp,
+                            code="PENDING_LIVE",
+                        )
                     return ExecutionReport(
                         plan=plan,
                         success=False,
+                        filled=False,
                         response=resp,
                         error="订单成交超时：未观察到持仓变化。",
                         code="PENDING_TIMEOUT",
                     )
-        return ExecutionReport(plan=plan, success=True, response=resp)
+        filled = plan.action not in {SignalAction.BUY, SignalAction.SELL} or self.reconcile_position
+        return ExecutionReport(plan=plan, success=True, filled=filled, response=resp)
 
     def _has_effective_position(self, inst_id: str) -> bool:
         if not hasattr(self.okx, "get_positions"):

@@ -161,3 +161,90 @@ def test_support_signal_should_not_promote_from_hold_by_default() -> None:
     fused = engine.fuse(signals, analysis)
 
     assert fused.action == SignalAction.HOLD
+
+
+def test_box_oscillation_cannot_initiate_from_hold() -> None:
+    engine = SignalFusionEngine()
+    analysis = AnalysisView(action=SignalAction.HOLD, confidence=0.5, reason="flat")
+    signals = (
+        ObjectiveSignal("indicator", SignalAction.HOLD, 0.4, "indicator"),
+        _plugin_signal("box_oscillation", SignalAction.BUY, 0.9),
+    )
+
+    fused = engine.fuse(signals, analysis)
+
+    assert fused.action == SignalAction.HOLD
+
+
+def test_template_indicator_disagreement_strong_opposite_vetoes_to_hold() -> None:
+    engine = SignalFusionEngine()
+    analysis = AnalysisView(action=SignalAction.HOLD, confidence=0.5, reason="flat")
+    signals = (
+        ObjectiveSignal("indicator", SignalAction.SELL, 0.85, "MACD 空头动能增强"),
+    )
+
+    fused = engine.fuse(
+        signals,
+        analysis,
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.64,
+        allow_support_promotion=True,
+    )
+
+    assert fused.action == SignalAction.HOLD
+    assert any("模板" in note or "template" in note.lower() for note in fused.notes)
+
+
+def test_reversal_only_indicator_note_does_not_veto_template() -> None:
+    engine = SignalFusionEngine()
+    analysis = AnalysisView(action=SignalAction.HOLD, confidence=0.5, reason="flat")
+    signals = (
+        ObjectiveSignal("indicator", SignalAction.SELL, 0.85, "RSI 极度超买"),
+    )
+
+    fused = engine.fuse(
+        signals,
+        analysis,
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.64,
+        allow_support_promotion=True,
+    )
+
+    assert fused.action == SignalAction.BUY
+
+
+def test_strong_template_veto_is_terminal_and_support_cannot_repromote() -> None:
+    engine = SignalFusionEngine()
+    analysis = AnalysisView(action=SignalAction.HOLD, confidence=0.5, reason="flat")
+    signals = (
+        ObjectiveSignal("indicator", SignalAction.SELL, 0.9, "MACD 空头动能增强"),
+        _plugin_signal("volume_breakout", SignalAction.BUY, 0.9),
+    )
+
+    fused = engine.fuse(
+        signals,
+        analysis,
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.64,
+        allow_support_promotion=True,
+    )
+
+    assert fused.action == SignalAction.HOLD
+
+
+def test_strong_template_veto_is_terminal_and_analysis_cannot_repromote() -> None:
+    engine = SignalFusionEngine()
+    analysis = AnalysisView(action=SignalAction.BUY, confidence=0.9, reason="llm buy")
+    signals = (
+        ObjectiveSignal("indicator", SignalAction.SELL, 0.9, "MACD 空头动能增强"),
+    )
+
+    fused = engine.fuse(
+        signals,
+        analysis,
+        seeded_action=SignalAction.BUY,
+        seeded_confidence=0.64,
+        allow_support_promotion=True,
+    )
+
+    assert fused.action == SignalAction.HOLD

@@ -55,9 +55,12 @@ def sync_protection_orders(bundle: RuntimeBundle) -> int:
 def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     heartbeat_path = Path(bundle.settings.runtime.runtime_heartbeat_path)
     monitor = getattr(bundle, "protection_monitor", None)
+    lifecycle_manager = getattr(bundle, "position_lifecycle_manager", None)
     try:
         if monitor is not None and not bool(getattr(args, "dry_run", False)):
             monitor.start()
+        if lifecycle_manager is not None and not bool(getattr(args, "dry_run", False)):
+            lifecycle_manager.start()
         _write_runtime_heartbeat(path=heartbeat_path, status="running", cycle=1)
         log_strategy_snapshot(bundle)
         exit_code = run_runtime_cycle(bundle, args)
@@ -70,18 +73,23 @@ def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     finally:
         if monitor is not None and not bool(getattr(args, "dry_run", False)):
             monitor.stop()
+        if lifecycle_manager is not None and not bool(getattr(args, "dry_run", False)):
+            lifecycle_manager.stop()
 
 
 def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     heartbeat_path = Path(bundle.settings.runtime.runtime_heartbeat_path)
     interval = max(1, int(args.interval_minutes or bundle.settings.runtime.run_interval_minutes))
     monitor = getattr(bundle, "protection_monitor", None)
+    lifecycle_manager = getattr(bundle, "position_lifecycle_manager", None)
     logger.info("进入循环模式，间隔 {} 分钟（Ctrl+C 退出）", interval)
     log_strategy_snapshot(bundle)
     cycle = 0
     try:
         if monitor is not None and not bool(getattr(args, "dry_run", False)):
             monitor.start()
+        if lifecycle_manager is not None and not bool(getattr(args, "dry_run", False)):
+            lifecycle_manager.start()
         while True:
             cycle += 1
             started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -103,6 +111,8 @@ def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     finally:
         if monitor is not None and not bool(getattr(args, "dry_run", False)):
             monitor.stop()
+        if lifecycle_manager is not None and not bool(getattr(args, "dry_run", False)):
+            lifecycle_manager.stop()
 
 
 def show_runtime_status(bundle: RuntimeBundle) -> int:

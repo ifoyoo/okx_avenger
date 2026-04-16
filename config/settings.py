@@ -51,13 +51,13 @@ class AccountSettings(SettingsBase):
 
 class StrategySettings(SettingsBase):
     balance_usage_ratio: float = Field(0.7, alias="BALANCE_USAGE_RATIO")
-    default_leverage: float = Field(1.0, alias="DEFAULT_LEVERAGE")
+    default_leverage: float = Field(5.0, alias="DEFAULT_LEVERAGE")
     default_take_profit_upl_ratio: float = Field(0.2, alias="DEFAULT_TAKE_PROFIT_UPL_RATIO")
     default_stop_loss_upl_ratio: float = Field(0.1, alias="DEFAULT_STOP_LOSS_UPL_RATIO")
     risk_daily_loss_limit: float = Field(0.0, alias="RISK_DAILY_LOSS_LIMIT")
-    risk_daily_loss_limit_pct: float = Field(0.0, alias="RISK_DAILY_LOSS_LIMIT_PCT")
-    risk_consecutive_loss_limit: int = Field(0, alias="RISK_CONSECUTIVE_LOSS_LIMIT")
-    risk_consecutive_cooldown_minutes: int = Field(180, alias="RISK_CONSECUTIVE_COOLDOWN_MINUTES")
+    risk_daily_loss_limit_pct: float = Field(0.02, alias="RISK_DAILY_LOSS_LIMIT_PCT")
+    risk_consecutive_loss_limit: int = Field(3, alias="RISK_CONSECUTIVE_LOSS_LIMIT")
+    risk_consecutive_cooldown_minutes: int = Field(360, alias="RISK_CONSECUTIVE_COOLDOWN_MINUTES")
     risk_state_path: str = Field("data/risk_circuit_state.json", alias="RISK_STATE_PATH")
     strategy_signals_enabled: str = Field("all", alias="STRATEGY_SIGNALS_ENABLED")
     strategy_signal_weights: str = Field("", alias="STRATEGY_SIGNAL_WEIGHTS")
@@ -108,7 +108,7 @@ class StrategySettings(SettingsBase):
 
 class RuntimeSettings(SettingsBase):
     run_interval_minutes: int = Field(5, alias="RUN_INTERVAL_MINUTES")
-    default_max_position: float = Field(0.002, alias="DEFAULT_MAX_POSITION")
+    default_max_position: float = Field(0.02, alias="DEFAULT_MAX_POSITION")
     feature_limit: int = Field(150, alias="FEATURE_LIMIT")
     feature_min_samples: int = Field(80, alias="FEATURE_MIN_SAMPLES")
     feature_indicator_overrides: str = Field("", alias="FEATURE_INDICATOR_OVERRIDES")
@@ -116,9 +116,9 @@ class RuntimeSettings(SettingsBase):
     data_staleness_seconds: int = Field(180, alias="DATA_STALENESS_SECONDS")
     execution_pending_timeout_seconds: float = Field(0.0, alias="EXECUTION_PENDING_TIMEOUT_SECONDS")
     execution_pending_order_ttl_minutes: int = Field(60, alias="EXECUTION_PENDING_ORDER_TTL_MINUTES")
-    execution_allow_same_direction_scale_in: bool = Field(False, alias="EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN")
+    execution_allow_same_direction_scale_in: bool = Field(True, alias="EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN")
     execution_same_direction_scale_in_multiplier: float = Field(
-        1.0,
+        1.35,
         alias="EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER",
     )
     execution_reconcile_position: bool = Field(True, alias="EXECUTION_RECONCILE_POSITION")

@@ -110,8 +110,7 @@ class Strategy:
             action = SignalAction.HOLD
             confidence = min(confidence, 0.3)
         size = 0.0
-        higher_bias = next((sig for sig in objective_signals if sig.name == "higher_timeframe"), None)
-        trend_bias = higher_bias.action if higher_bias else SignalAction.HOLD
+        trend_bias = SignalAction.HOLD
         if action != SignalAction.HOLD:
             size = self.position_sizer.size(
                 context=context,

@@ -15,8 +15,11 @@ from cli_app.runtime_helpers import (
 )
 from core.engine.execution import ExecutionPlan
 from core.models import SignalAction, TradeSignal
+from core.strategy.lifecycle import build_lifecycle_plan
 from core.strategy.plugins import format_plugin_snapshot
 from core.utils import NotificationEvent
+
+DEFAULT_LIFECYCLE_SCALE_IN_RATIO = 0.35
 
 
 def _normalize_protection_ratio(rule: object, fallback: float) -> float:
@@ -66,6 +69,29 @@ def _publish_runtime_error(bundle: RuntimeBundle, *, inst_id: str, timeframe: st
             timeframe=timeframe,
             detail=detail,
         )
+    )
+
+
+def _register_position_lifecycle_plan(
+    *,
+    position_lifecycle_manager: object,
+    signal: TradeSignal,
+    plan: Optional[ExecutionPlan],
+) -> None:
+    if signal.action not in {SignalAction.BUY, SignalAction.SELL} or plan is None or plan.blocked:
+        return
+    latest_price = float(plan.latest_price or plan.price or 0.0)
+    entry_price = float(plan.price or plan.latest_price or 0.0)
+    # ExecutionPlan.est_slippage is populated as atr / latest_price in ExecutionEngine.build_plan().
+    atr = abs(float(plan.est_slippage or 0.0)) * latest_price
+    if latest_price <= 0 or entry_price <= 0 or atr <= 0 or plan.size <= 0:
+        return
+    lifecycle_plan = build_lifecycle_plan(signal.action, entry_price, atr, DEFAULT_LIFECYCLE_SCALE_IN_RATIO)
+    position_lifecycle_manager.register_plan(
+        inst_id=plan.inst_id,
+        pos_side=plan.pos_side or "net",
+        size=plan.size,
+        plan=lifecycle_plan,
     )
 
 
@@ -131,6 +157,10 @@ def _publish_runtime_result(
                 detail=error_text or "-",
             )
         )
+
+
+def _is_filled_execution_report(report: Optional[object]) -> bool:
+    return bool(report is not None and getattr(report, "success", False) and getattr(report, "filled", True))
 
 
 def _is_failed_execution_result(
@@ -260,6 +290,7 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         return 0
 
     protection_monitor = getattr(bundle, "protection_monitor", None)
+    position_lifecycle_manager = getattr(bundle, "position_lifecycle_manager", None)
     if protection_monitor is not None and not bool(args.dry_run):
         _configure_protection_monitor(bundle, entries)
 
@@ -271,23 +302,31 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
     for item in entries:
         inst_id = item["inst_id"]
         timeframe = item.get("timeframe", DEFAULT_TIMEFRAME)
-        higher_timeframes = tuple(item.get("higher_timeframes", DEFAULT_HIGHER_TIMEFRAMES))
-        max_position = float(item.get("max_position", bundle.settings.runtime.default_max_position))
-        protection_overrides = item.get("protection")
-        if protection_overrides is not None and not isinstance(protection_overrides, dict):
-            protection_overrides = None
+        protection_overrides = item.get("protection") if isinstance(item.get("protection"), dict) else None
+        current_snapshot = _safe_account_snapshot(bundle.engine)
+        if not current_snapshot:
+            if not bool(args.dry_run):
+                _publish_runtime_error(
+                    bundle,
+                    inst_id=inst_id,
+                    timeframe=timeframe,
+                    detail="账户快照刷新失败，本轮只观察不执行。",
+                )
+                hold += 1
+                continue
+            current_snapshot = account_snapshot
         try:
             result = bundle.engine.run_once(
                 inst_id=inst_id,
                 timeframe=timeframe,
                 limit=args.limit,
                 dry_run=bool(args.dry_run),
-                max_position=max_position,
-                higher_timeframes=higher_timeframes,
+                max_position=float(item.get("max_position", bundle.settings.runtime.default_max_position)),
+                higher_timeframes=tuple(item.get("higher_timeframes", DEFAULT_HIGHER_TIMEFRAMES)),
                 market_intel_query=item.get("news_query"),
                 market_intel_coin_id=item.get("news_coin_id"),
                 market_intel_aliases=item.get("news_aliases"),
-                account_snapshot=account_snapshot,
+                account_snapshot=current_snapshot or account_snapshot,
                 protection_overrides=protection_overrides,
                 perf_stats=perf_stats,
                 daily_stats=daily_stats,
@@ -298,17 +337,32 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
             _publish_runtime_error(bundle, inst_id=inst_id, timeframe=timeframe, detail=str(exc))
             failed += 1
             continue
-        if protection_monitor is not None and not bool(args.dry_run):
-            try:
-                protection_monitor.enforce()
-            except Exception as exc:
-                logger.warning("保护单同步失败 inst={} err={}", inst_id, exc)
 
         signal: TradeSignal = result["signal"]
         plan: Optional[ExecutionPlan] = (result.get("execution") or {}).get("plan")
         report = (result.get("execution") or {}).get("report")
         brain = result.get("analysis_brain")
         intel = result.get("market_intel")
+        if (
+            _is_filled_execution_report(report)
+            and protection_monitor is not None
+            and not bool(args.dry_run)
+        ):
+            try:
+                protection_monitor.enforce()
+            except Exception as exc:
+                _publish_runtime_error(bundle, inst_id=inst_id, timeframe=timeframe, detail=f"保护单补挂失败: {exc}")
+        if position_lifecycle_manager is not None and not bool(args.dry_run):
+            try:
+                if _is_filled_execution_report(report):
+                    _register_position_lifecycle_plan(
+                        position_lifecycle_manager=position_lifecycle_manager,
+                        signal=signal,
+                        plan=plan,
+                    )
+                    position_lifecycle_manager.enforce()
+            except Exception as exc:
+                logger.warning("生命周期管理同步失败 inst={} err={}", inst_id, exc)
         logger.info(
             _format_runtime_result_line(
                 inst_id=inst_id,

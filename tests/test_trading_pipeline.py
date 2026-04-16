@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+import math
 
 from core.analysis import MarketAnalysis
 from core.engine.execution import ExecutionPlan
@@ -245,6 +246,147 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
     assert result["signal"] is risk_signal
     assert result["execution"]["plan"] is execution_step_output.plan
     assert result["order"] == {"ordId": "demo"}
+
+
+def test_log_decision_records_analysis_gated_and_final_actions(monkeypatch) -> None:
+    engine = _build_engine()
+    records = []
+    monkeypatch.setattr(engine.decision_logger, "log", lambda record: records.append(record))
+    features = _sample_features()
+
+    engine._log_decision(
+        features=features,
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890",
+        summary="summary",
+        strategy_output=SimpleNamespace(
+            analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence=0.66, reason="analysis"),
+            entry_template=SimpleNamespace(action=SignalAction.BUY, template_name="pullback_long"),
+        ),
+        signal=TradeSignal(action=SignalAction.BUY, confidence=0.71, reason="final", size=0.01),
+    )
+
+    assert records[0].analysis_action == "buy"
+    assert records[0].gated_action == "buy"
+    assert records[0].final_strategy_action == "buy"
+    payload = records[0].as_dict()
+    assert payload["llm_action"] == "buy"
+    assert payload["strategy_action"] == "buy"
+
+
+def test_log_decision_accepts_string_actions_for_compatibility(monkeypatch) -> None:
+    engine = _build_engine()
+    records = []
+    monkeypatch.setattr(engine.decision_logger, "log", lambda record: records.append(record))
+    features = _sample_features()
+
+    engine._log_decision(
+        features=features,
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890",
+        summary="summary",
+        strategy_output=SimpleNamespace(
+            analysis_view=SimpleNamespace(action="buy", confidence=0.66, reason="analysis"),
+            entry_template=SimpleNamespace(action="buy", template_name="pullback_long"),
+        ),
+        signal=TradeSignal(action=SignalAction.BUY, confidence=0.71, reason="final", size=0.01),
+    )
+
+    assert records[0].analysis_action == "buy"
+    assert records[0].gated_action == "buy"
+
+
+def test_log_decision_tolerates_partial_analysis_view(monkeypatch) -> None:
+    engine = _build_engine()
+    records = []
+    monkeypatch.setattr(engine.decision_logger, "log", lambda record: records.append(record))
+    features = _sample_features()
+
+    engine._log_decision(
+        features=features,
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890",
+        summary="summary",
+        strategy_output=SimpleNamespace(
+            analysis_view=SimpleNamespace(action=SignalAction.BUY),
+            entry_template=None,
+        ),
+        signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
+    )
+
+    assert records[0].analysis_action == "buy"
+    assert records[0].analysis_confidence == 0.0
+    assert records[0].analysis_reason == ""
+
+
+def test_log_decision_tolerates_non_numeric_analysis_confidence(monkeypatch) -> None:
+    engine = _build_engine()
+    records = []
+    monkeypatch.setattr(engine.decision_logger, "log", lambda record: records.append(record))
+    features = _sample_features()
+
+    engine._log_decision(
+        features=features,
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890",
+        summary="summary",
+        strategy_output=SimpleNamespace(
+            analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence="N/A", reason="analysis"),
+            entry_template=None,
+        ),
+        signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
+    )
+
+    assert records[0].analysis_confidence == 0.0
+
+
+def test_log_decision_tolerates_empty_features(monkeypatch) -> None:
+    engine = _build_engine()
+    records = []
+    monkeypatch.setattr(engine.decision_logger, "log", lambda record: records.append(record))
+
+    engine._log_decision(
+        features=pd.DataFrame(),
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890",
+        summary="summary",
+        strategy_output=SimpleNamespace(
+            analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence=0.66, reason="analysis"),
+            entry_template=None,
+        ),
+        signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
+    )
+
+    assert records[0].timestamp == ""
+    assert records[0].close_price == 0.0
+
+
+def test_log_decision_normalizes_non_finite_values(monkeypatch) -> None:
+    engine = _build_engine()
+    records = []
+    monkeypatch.setattr(engine.decision_logger, "log", lambda record: records.append(record))
+    features = pd.DataFrame([{"ts": "2026-01-01T00:00:00Z", "close": math.nan}])
+
+    engine._log_decision(
+        features=features,
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890",
+        summary="summary",
+        strategy_output=SimpleNamespace(
+            analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence=math.nan, reason="analysis"),
+            entry_template=None,
+        ),
+        signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
+    )
+
+    assert records[0].analysis_confidence == 0.0
+    assert records[0].close_price == 0.0
 
 
 def test_strategy_step_only_generates_signal_without_risk(monkeypatch) -> None:

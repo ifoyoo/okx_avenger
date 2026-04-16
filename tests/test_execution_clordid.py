@@ -158,7 +158,8 @@ def test_execute_treats_live_limit_order_as_submitted(monkeypatch) -> None:
     report = engine.execute(plan)
 
     assert report.success is True
-    assert report.code is None
+    assert report.filled is False
+    assert report.code == "PENDING_LIVE"
 
 
 def test_build_plan_resolves_attach_algo_orders_from_trade_protection() -> None:
@@ -238,3 +239,31 @@ def test_build_plan_resolves_attach_algo_orders_from_upl_ratio_protection() -> N
             "slOrdKind": "condition",
         }
     ]
+
+
+def test_build_plan_blocks_when_protection_cannot_be_resolved() -> None:
+    engine = ExecutionEngine(_DummyOKXClient())
+    signal = TradeSignal(
+        action=SignalAction.BUY,
+        confidence=0.7,
+        reason="x",
+        size=0.01,
+        protection=TradeProtection(
+            take_profit=ProtectionRule(mode="rr", value=2.0),
+            stop_loss=ProtectionRule(mode="atr", value=1.1),
+        ),
+    )
+
+    plan = engine.build_plan(
+        inst_id="BTC-USDT-SWAP",
+        signal=signal,
+        td_mode="cross",
+        pos_side="long",
+        latest_price=100.0,
+        atr=0.0,
+        trace_id="protect-block",
+    )
+
+    assert plan.blocked is True
+    assert plan.protection is None
+    assert plan.block_reason == "保护参数无法解析，取消无保护下单。"

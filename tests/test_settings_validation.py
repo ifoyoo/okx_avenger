@@ -54,8 +54,8 @@ def test_intel_settings_reject_invalid_threshold_order() -> None:
 
 def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
     assert RuntimeSettings.model_fields["execution_pending_order_ttl_minutes"].default == 60
-    assert RuntimeSettings.model_fields["execution_allow_same_direction_scale_in"].default is False
-    assert RuntimeSettings.model_fields["execution_same_direction_scale_in_multiplier"].default == 1.0
+    assert RuntimeSettings.model_fields["execution_allow_same_direction_scale_in"].default is True
+    assert RuntimeSettings.model_fields["execution_same_direction_scale_in_multiplier"].default == 1.35
 
     runtime = RuntimeSettings(
         EXECUTION_PENDING_ORDER_TTL_MINUTES=30,
@@ -74,6 +74,29 @@ def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
 def test_runtime_settings_reject_invalid_same_direction_scale_in_multiplier() -> None:
     with pytest.raises(ValidationError):
         RuntimeSettings(EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=0.5)
+
+
+def test_settings_defaults_match_redesign(monkeypatch) -> None:
+    # SettingsBase loads .env into the process environment (if present).
+    # Ensure this test validates code defaults rather than local env overrides.
+    for key in (
+        "DEFAULT_LEVERAGE",
+        "DEFAULT_MAX_POSITION",
+        "EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN",
+        "EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER",
+        "RISK_DAILY_LOSS_LIMIT_PCT",
+        "RISK_CONSECUTIVE_LOSS_LIMIT",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    settings = RuntimeSettings()
+    strategy = StrategySettings()
+
+    assert strategy.default_leverage == 5.0
+    assert settings.default_max_position == 0.02
+    assert settings.execution_allow_same_direction_scale_in is True
+    assert settings.execution_same_direction_scale_in_multiplier == 1.35
+    assert strategy.risk_daily_loss_limit_pct == 0.02
+    assert strategy.risk_consecutive_loss_limit == 3
 
 
 def test_notification_settings_normalize_level() -> None:

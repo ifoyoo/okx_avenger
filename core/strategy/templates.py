@@ -48,7 +48,7 @@ def evaluate_entry_template(*, gate: HigherTimeframeGate, features: pd.DataFrame
     near_fast = abs(close - ema_fast) / max(ema_fast, 1e-9) <= 0.004
 
     if gate.allow_long and ema_fast >= ema_slow and near_fast and volume <= prev_volume and 45.0 <= rsi <= 62.0:
-        return EntryTemplateMatch("pullback_long", SignalAction.BUY, 0.58, f"close~{ema_fast:.4f} pullback reclaim")
+        return EntryTemplateMatch("pullback_long", SignalAction.BUY, 0.58, f"close>{ema_fast:.4f} reclaim over pullback")
 
     if gate.allow_breakout_long and close > prev_high and volume > prev_volume * 1.2 and rsi < 68.0:
         return EntryTemplateMatch("breakout_long", SignalAction.BUY, 0.64, "range break with volume")

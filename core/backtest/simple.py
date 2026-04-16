@@ -11,6 +11,9 @@ import pandas as pd
 from core.models import ResolvedTradeProtection, SignalAction, StrategyContext, TradeSignal
 from core.protection import resolve_trade_protection
 from core.strategy.core import Strategy
+from core.strategy.lifecycle import build_lifecycle_plan
+
+TP1_PARTIAL_EXIT_RATIO = 0.4
 
 
 @dataclass
@@ -124,14 +127,25 @@ def _open_position(
         entry_price=entry_exec,
         atr=atr,
     )
+    lifecycle_plan = None
+    if protection is None and signal.action in (SignalAction.BUY, SignalAction.SELL) and atr > 0:
+        try:
+            lifecycle_plan = build_lifecycle_plan(signal.action, entry_exec, atr)
+        except Exception:
+            lifecycle_plan = None
     return {
         "side": signal.action,
         "qty": float(signal.size),
+        "remaining_qty": float(signal.size),
         "entry_price": entry_exec,
         "entry_idx": entry_idx,
         "entry_ts": _safe_ts(bar.get("ts")),
         "reason_entry": signal.reason.splitlines()[0] if signal.reason else signal.action.value,
         "protection": protection,
+        "lifecycle_plan": lifecycle_plan,
+        "partial_exits": [],
+        "tp1_hit": False,
+        "tp2_hit": False,
     }
 
 
@@ -165,6 +179,69 @@ def _protection_exit(
     return None
 
 
+def _lifecycle_exit(
+    *,
+    position: Dict[str, Any],
+    bar: pd.Series,
+) -> Optional[Dict[str, Any]]:
+    plan = position.get("lifecycle_plan")
+    if plan is None:
+        return None
+
+    high = float(bar.get("high", 0.0) or bar.get("close", 0.0) or 0.0)
+    low = float(bar.get("low", 0.0) or bar.get("close", 0.0) or 0.0)
+    side = position["side"]
+    tp1_hit = bool(position.get("tp1_hit", False))
+    tp2_hit = bool(position.get("tp2_hit", False))
+    entry_price = float(getattr(plan, "entry_price", 0.0) or 0.0)
+    stop_price = float(getattr(plan, "stop_price", 0.0) or 0.0)
+    tp1_price = float(getattr(plan, "tp1_price", 0.0) or 0.0)
+    tp2_price = float(getattr(plan, "tp2_price", 0.0) or 0.0)
+
+    tp1_reached = False
+    tp2_reached = False
+    stop_hit = False
+    runner_stop_hit = False
+    if side == SignalAction.BUY:
+        tp1_reached = high >= tp1_price > 0
+        tp2_reached = high >= tp2_price > 0
+        stop_hit = stop_price > 0 and low <= stop_price
+        runner_stop_hit = entry_price > 0 and low <= entry_price
+    else:
+        tp1_reached = tp1_price > 0 and low <= tp1_price
+        tp2_reached = tp2_price > 0 and low <= tp2_price
+        stop_hit = stop_price > 0 and high >= stop_price
+        runner_stop_hit = entry_price > 0 and high >= entry_price
+
+    if not tp1_hit and stop_hit:
+        return {"reason_exit": "stop_loss", "exit_price": stop_price}
+
+    if not tp1_hit and tp1_reached:
+        remaining_qty = float(position.get("remaining_qty", position.get("qty", 0.0)) or 0.0)
+        partial_qty = min(remaining_qty, remaining_qty * TP1_PARTIAL_EXIT_RATIO)
+        if partial_qty > 0:
+            partials = position.setdefault("partial_exits", [])
+            partials.append(
+                {
+                    "qty": partial_qty,
+                    "exit_price": tp1_price,
+                    "reason_exit": "take_profit_1",
+                }
+            )
+            position["remaining_qty"] = max(0.0, remaining_qty - partial_qty)
+        tp1_hit = True
+        position["tp1_hit"] = True
+
+    if tp1_hit and runner_stop_hit:
+        return {"reason_exit": "runner_stop", "exit_price": entry_price}
+
+    tp2_hit = tp2_hit or tp2_reached
+    position["tp2_hit"] = tp2_hit
+    if tp2_reached:
+        return {"reason_exit": "take_profit_2", "exit_price": tp2_price}
+    return None
+
+
 def _close_position(
     *,
     position: Dict[str, Any],
@@ -176,10 +253,25 @@ def _close_position(
     fee_rate: float,
 ) -> Dict[str, Any]:
     qty = float(position["qty"])
+    remaining_qty = float(position.get("remaining_qty", qty) or 0.0)
     entry_price = float(position["entry_price"])
-    gross = _pnl(position["side"], qty, entry_price, exit_price)
-    fee = (entry_price + exit_price) * qty * max(0.0, fee_rate)
+    gross = 0.0
+    fee = 0.0
+    exit_notional = 0.0
+    for partial in position.get("partial_exits", []):
+        partial_qty = float(partial.get("qty", 0.0) or 0.0)
+        partial_exit_price = float(partial.get("exit_price", 0.0) or 0.0)
+        if partial_qty <= 0 or partial_exit_price <= 0:
+            continue
+        gross += _pnl(position["side"], partial_qty, entry_price, partial_exit_price)
+        fee += (entry_price + partial_exit_price) * partial_qty * max(0.0, fee_rate)
+        exit_notional += partial_qty * partial_exit_price
+    if remaining_qty > 0 and exit_price > 0:
+        gross += _pnl(position["side"], remaining_qty, entry_price, exit_price)
+        fee += (entry_price + exit_price) * remaining_qty * max(0.0, fee_rate)
+        exit_notional += remaining_qty * exit_price
     net = gross - fee
+    effective_exit_price = (exit_notional / qty) if qty > 0 and exit_notional > 0 else exit_price
     bars_held = max(0, int(position.get("exit_idx", position["entry_idx"])) - int(position["entry_idx"]))
     trade = BacktestTrade(
         inst_id=inst_id,
@@ -189,7 +281,7 @@ def _close_position(
         entry_ts=str(position["entry_ts"]),
         exit_ts=_safe_ts(exit_ts),
         entry_price=entry_price,
-        exit_price=exit_price,
+        exit_price=effective_exit_price,
         bars_held=bars_held,
         reason_entry=str(position["reason_entry"]),
         reason_exit=reason_exit,
@@ -204,6 +296,7 @@ def run_backtest_from_features(
     *,
     strategy: Strategy,
     features: pd.DataFrame,
+    higher_timeframe_features: Optional[Dict[str, pd.DataFrame]] = None,
     inst_id: str,
     timeframe: str,
     warmup: int = 120,
@@ -236,6 +329,13 @@ def run_backtest_from_features(
         if next_open <= 0:
             continue
 
+        higher_hist = None
+        if higher_timeframe_features and "1H" in higher_timeframe_features:
+            try:
+                higher_hist = higher_timeframe_features["1H"].loc[: hist.index[-1]]
+            except Exception:
+                higher_hist = higher_timeframe_features["1H"]
+        higher_features = {"1H": higher_hist} if higher_hist is not None and not higher_hist.empty else {}
         context = StrategyContext(
             inst_id=inst_id,
             timeframe=timeframe,
@@ -244,8 +344,9 @@ def run_backtest_from_features(
             leverage=leverage,
             account_equity=equity,
             available_balance=equity,
+            higher_timeframes=tuple(higher_features.keys()),
         )
-        signal = strategy.generate_signal(context, hist, analysis_text, None).trade_signal
+        signal = strategy.generate_signal(context, hist, analysis_text, higher_features).trade_signal
         signal_atr = float(hist.iloc[-1].get("atr", 0.0) or 0.0)
 
         if position is not None:
@@ -300,15 +401,17 @@ def run_backtest_from_features(
         if position is None:
             continue
 
-        protection_exit = _protection_exit(position=position, bar=next_bar)
-        if protection_exit is None:
+        exit_decision = _protection_exit(position=position, bar=next_bar)
+        if exit_decision is None:
+            exit_decision = _lifecycle_exit(position=position, bar=next_bar)
+        if exit_decision is None:
             continue
         position["exit_idx"] = i + 1
         closed = _close_position(
             position=position,
-            exit_price=float(protection_exit["exit_price"]),
+            exit_price=float(exit_decision["exit_price"]),
             exit_ts=next_bar.get("ts"),
-            reason_exit=str(protection_exit["reason_exit"]),
+            reason_exit=str(exit_decision["reason_exit"]),
             inst_id=inst_id,
             timeframe=timeframe,
             fee_rate=fee_rate,

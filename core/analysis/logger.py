@@ -29,9 +29,10 @@ class DecisionRecord:
     timeframe: str
     timestamp: str
     analysis_action: str
+    gated_action: str
+    final_strategy_action: str
     analysis_confidence: float
     analysis_reason: str
-    strategy_action: str
     close_price: float
     trace_id: Optional[str] = None
 
@@ -41,9 +42,12 @@ class DecisionRecord:
             "timeframe": self.timeframe,
             "timestamp": self.timestamp,
             "analysis_action": self.analysis_action,
+            "llm_action": self.analysis_action,
+            "gated_action": self.gated_action,
+            "final_strategy_action": self.final_strategy_action,
+            "strategy_action": self.final_strategy_action,
             "analysis_confidence": self.analysis_confidence,
             "analysis_reason": self.analysis_reason,
-            "strategy_action": self.strategy_action,
             "close_price": self.close_price,
         }
         if self.trace_id:
