@@ -111,6 +111,10 @@ class Strategy:
             confidence = min(confidence, 0.3)
         size = 0.0
         trend_bias = SignalAction.HOLD
+        if gate_decision.allow_long and not gate_decision.allow_short:
+            trend_bias = SignalAction.BUY
+        elif gate_decision.allow_short and not gate_decision.allow_long:
+            trend_bias = SignalAction.SELL
         if action != SignalAction.HOLD:
             size = self.position_sizer.size(
                 context=context,

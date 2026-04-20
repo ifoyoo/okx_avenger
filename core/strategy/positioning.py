@@ -11,7 +11,7 @@ from core.models import SignalAction, StrategyContext
 
 
 VOL_TARGET = 0.015
-GLOBAL_POSITION_CAP = 0.05
+GLOBAL_POSITION_CAP = 0.0
 
 
 @dataclass
@@ -72,7 +72,9 @@ class PositionSizer:
             else:
                 dynamic *= 0.75
         floor = base * self.config.min_floor_ratio
-        cap = self.config.global_cap
+        cap = base
+        if self.config.global_cap > 0:
+            cap = min(cap, float(self.config.global_cap))
         if action == SignalAction.SELL:
             mult = max(0.0, float(self.config.short_size_multiplier or 0.0))
             dynamic *= mult

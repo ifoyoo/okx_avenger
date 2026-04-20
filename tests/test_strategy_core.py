@@ -220,7 +220,7 @@ def test_generate_signal_records_gate_reason_and_template_name() -> None:
     assert "[template]" in result.trade_signal.reason
 
 
-def test_generate_signal_does_not_use_legacy_higher_timeframe_bias_for_size(monkeypatch) -> None:
+def test_generate_signal_uses_gate_direction_for_position_sizing(monkeypatch) -> None:
     strategy = Strategy()
     context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
     features = _features()
@@ -256,7 +256,7 @@ def test_generate_signal_does_not_use_legacy_higher_timeframe_bias_for_size(monk
 
     assert result.entry_template is not None
     assert result.trade_signal.action == SignalAction.BUY
-    assert captured.get("trend_bias") == SignalAction.HOLD
+    assert captured.get("trend_bias") == SignalAction.BUY
 
 
 def test_generate_signal_does_not_trade_on_reversal_only_indicator_note_without_template(monkeypatch) -> None:

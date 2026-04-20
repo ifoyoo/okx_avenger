@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 
@@ -29,10 +29,25 @@ def _build_features_for_backtest(okx: OKXClient, inst_id: str, timeframe: str, l
     return candles_to_dataframe(raw).tail(limit)
 
 
+def _build_higher_timeframe_features_for_backtest(
+    okx: OKXClient,
+    inst_id: str,
+    higher_timeframes: Optional[Iterable[str]],
+    limit: int,
+) -> Dict[str, pd.DataFrame]:
+    features_map: Dict[str, pd.DataFrame] = {}
+    for timeframe in tuple(higher_timeframes or ()):
+        frame = _build_features_for_backtest(okx, inst_id, str(timeframe), limit)
+        if not frame.empty:
+            features_map[str(timeframe)] = frame
+    return features_map
+
+
 def _run_single_backtest(
     *,
     strategy: Strategy,
     features: pd.DataFrame,
+    higher_timeframe_features: Optional[Dict[str, pd.DataFrame]] = None,
     inst_id: str,
     timeframe: str,
     warmup: int,
@@ -47,6 +62,7 @@ def _run_single_backtest(
     return run_backtest_from_features(
         strategy=strategy,
         features=features,
+        higher_timeframe_features=higher_timeframe_features,
         inst_id=inst_id,
         timeframe=timeframe,
         warmup=warmup,
