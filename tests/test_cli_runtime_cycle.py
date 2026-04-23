@@ -68,6 +68,8 @@ class _FakeEngine:
                 reason="test",
                 size=0.1,
             ),
+            "entry_tier": "fast-path",
+            "signal_candle_source": "latest_confirmed",
             "execution": execution,
             "order": {"ordId": "1"} if not bool(kwargs.get("dry_run")) else None,
         }
@@ -391,7 +393,7 @@ def test_run_runtime_cycle_logs_compact_per_inst_result(monkeypatch) -> None:
 
     assert runtime_execution.run_runtime_cycle(bundle, _make_args(dry_run=True)) == 0
     assert info_calls[1] == (
-        "inst=BTC-USDT-SWAP tf=5m action=BUY conf=0.82 result=dry_run plan=LIMIT slip=0.10%",
+        "inst=BTC-USDT-SWAP tf=5m action=BUY conf=0.82 result=dry_run entry=fast-path plan=LIMIT slip=0.10%",
         (),
     )
 

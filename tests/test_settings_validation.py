@@ -55,7 +55,7 @@ def test_intel_settings_reject_invalid_threshold_order() -> None:
 def test_runtime_settings_do_not_expose_unused_app_metadata() -> None:
     assert RuntimeSettings.model_fields["execution_pending_order_ttl_minutes"].default == 60
     assert RuntimeSettings.model_fields["execution_allow_same_direction_scale_in"].default is True
-    assert RuntimeSettings.model_fields["execution_same_direction_scale_in_multiplier"].default == 1.35
+    assert RuntimeSettings.model_fields["execution_same_direction_scale_in_multiplier"].default == 2.2
 
     runtime = RuntimeSettings(
         EXECUTION_PENDING_ORDER_TTL_MINUTES=30,
@@ -86,17 +86,21 @@ def test_settings_defaults_match_redesign(monkeypatch) -> None:
         "EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER",
         "RISK_DAILY_LOSS_LIMIT_PCT",
         "RISK_CONSECUTIVE_LOSS_LIMIT",
+        "RISK_CONSECUTIVE_COOLDOWN_MINUTES",
+        "BALANCE_USAGE_RATIO",
     ):
         monkeypatch.delenv(key, raising=False)
     settings = RuntimeSettings()
     strategy = StrategySettings()
 
-    assert strategy.default_leverage == 5.0
+    assert strategy.balance_usage_ratio == 0.9
+    assert strategy.default_leverage == 8.0
     assert settings.default_max_position == 0.02
     assert settings.execution_allow_same_direction_scale_in is True
-    assert settings.execution_same_direction_scale_in_multiplier == 1.35
-    assert strategy.risk_daily_loss_limit_pct == 0.02
-    assert strategy.risk_consecutive_loss_limit == 3
+    assert settings.execution_same_direction_scale_in_multiplier == 2.2
+    assert strategy.risk_daily_loss_limit_pct == 0.08
+    assert strategy.risk_consecutive_loss_limit == 6
+    assert strategy.risk_consecutive_cooldown_minutes == 90
 
 
 def test_notification_settings_normalize_level() -> None:

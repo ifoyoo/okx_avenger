@@ -35,6 +35,11 @@ class DecisionRecord:
     analysis_reason: str
     close_price: float
     trace_id: Optional[str] = None
+    template_present: bool = False
+    template_name: Optional[str] = None
+    higher_timeframe_note: str = ""
+    entry_tier: str = "none"
+    signal_candle_source: str = "latest_only"
 
     def as_dict(self) -> Dict[str, Any]:
         payload = {
@@ -49,9 +54,15 @@ class DecisionRecord:
             "analysis_confidence": self.analysis_confidence,
             "analysis_reason": self.analysis_reason,
             "close_price": self.close_price,
+            "template_present": self.template_present,
+            "higher_timeframe_note": self.higher_timeframe_note,
+            "entry_tier": self.entry_tier,
+            "signal_candle_source": self.signal_candle_source,
         }
         if self.trace_id:
             payload["trace_id"] = self.trace_id
+        if self.template_name is not None:
+            payload["template_name"] = self.template_name
         return payload
 
     def to_json(self) -> str:

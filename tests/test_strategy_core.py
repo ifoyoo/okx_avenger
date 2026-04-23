@@ -178,10 +178,11 @@ def _features() -> pd.DataFrame:
     )
 
 
-def test_generate_signal_keeps_hold_without_template_even_when_support_plugin_is_directional(monkeypatch) -> None:
+def test_generate_signal_allows_fast_path_without_template_when_support_plugin_is_directional(monkeypatch) -> None:
     strategy = Strategy()
     context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
     features = _features()
+    features.loc[89, "volume"] = 1600.0
 
     monkeypatch.setattr(
         strategy.signal_generator,
@@ -194,8 +195,9 @@ def test_generate_signal_keeps_hold_without_template_even_when_support_plugin_is
 
     result = strategy.generate_signal(context, features, '{"action":"hold","confidence":0.5,"reason":"flat"}', None)
 
-    assert result.trade_signal.action == SignalAction.HOLD
+    assert result.trade_signal.action == SignalAction.BUY
     assert result.entry_template is None
+    assert result.entry_tier == "fast-path"
 
 
 def test_generate_signal_records_gate_reason_and_template_name() -> None:
@@ -216,21 +218,23 @@ def test_generate_signal_records_gate_reason_and_template_name() -> None:
     assert result.gate_decision is not None
     assert result.entry_template is not None
     assert result.entry_template.template_name
+    assert result.entry_tier == "template-qualified"
+    assert result.signal_candle_source == "latest_confirmed"
     assert "[gate]" in result.trade_signal.reason
     assert "[template]" in result.trade_signal.reason
 
 
-def test_generate_signal_uses_gate_direction_for_position_sizing(monkeypatch) -> None:
+def test_generate_signal_does_not_use_higher_timeframe_bias_for_position_sizing(monkeypatch) -> None:
     strategy = Strategy()
     context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
     features = _features()
     higher = _features().tail(10).copy()
     higher["adx"] = 22.0
-    higher["rsi"] = 57.0
-    higher["ema_slow"] = 99.0
-    higher["ema_fast"] = 99.2
-    higher.iloc[-2, higher.columns.get_loc("ema_fast")] = 99.25
-    higher.iloc[-1, higher.columns.get_loc("ema_fast")] = 99.35
+    higher["rsi"] = 40.0
+    higher["ema_slow"] = 99.4
+    higher["ema_fast"] = 99.0
+    higher.iloc[-2, higher.columns.get_loc("ema_fast")] = 99.1
+    higher.iloc[-1, higher.columns.get_loc("ema_fast")] = 98.9
     higher_features = {"1H": higher}
 
     monkeypatch.setattr(
@@ -256,13 +260,14 @@ def test_generate_signal_uses_gate_direction_for_position_sizing(monkeypatch) ->
 
     assert result.entry_template is not None
     assert result.trade_signal.action == SignalAction.BUY
-    assert captured.get("trend_bias") == SignalAction.BUY
+    assert captured.get("trend_bias") == SignalAction.HOLD
 
 
 def test_generate_signal_does_not_trade_on_reversal_only_indicator_note_without_template(monkeypatch) -> None:
     strategy = Strategy()
     context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
     features = _features()
+    features.loc[89, "volume"] = 1600.0
 
     monkeypatch.setattr(
         strategy.signal_generator,
@@ -276,3 +281,28 @@ def test_generate_signal_does_not_trade_on_reversal_only_indicator_note_without_
 
     assert result.entry_template is None
     assert result.trade_signal.action == SignalAction.HOLD
+
+
+def test_generate_signal_marks_previous_confirmed_signal_candle_source(monkeypatch) -> None:
+    strategy = Strategy()
+    context = StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01)
+    features = _features().tail(4).copy().reset_index(drop=True)
+    features["confirm"] = "1"
+    features.loc[3, "confirm"] = "0"
+    features.loc[3, "rsi"] = 72.0
+    features.loc[3, "volume"] = 10.0
+
+    monkeypatch.setattr(
+        strategy.signal_generator,
+        "build",
+        lambda *_args, **_kwargs: (
+            ObjectiveSignal("indicator", SignalAction.BUY, 0.7, "MACD 多头动能增强"),
+        ),
+    )
+    monkeypatch.setattr(strategy.signal_generator, "liquidity_snapshot", lambda _features: (True, None))
+    monkeypatch.setattr(strategy.signal_generator, "volatility_regime", lambda _higher: (1.0, None))
+    monkeypatch.setattr(strategy.position_sizer, "size", lambda **_kwargs: 0.01)
+
+    result = strategy.generate_signal(context, features, '{"action":"buy","confidence":0.6,"reason":"ok"}', None)
+
+    assert result.signal_candle_source == "previous_confirmed"

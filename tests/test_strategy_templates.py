@@ -47,12 +47,13 @@ def test_evaluate_entry_template_matches_pullback_long() -> None:
     assert match.action.value == "buy"
 
 
-def test_evaluate_entry_template_returns_none_when_gate_blocks_side() -> None:
-    gate = HigherTimeframeGate(False, False, False, False, "mixed", "no_trade", "1H mixed")
+def test_evaluate_entry_template_ignores_gate_veto_when_template_matches() -> None:
+    gate = HigherTimeframeGate(False, True, False, True, "bearish", "allow_short", "1H bearish")
 
     match = evaluate_entry_template(gate=gate, features=_features())
 
-    assert match is None
+    assert match is not None
+    assert match.template_name == "pullback_long"
 
 
 def test_pullback_long_requires_volume_not_higher_than_prev_candle() -> None:
@@ -70,6 +71,23 @@ def test_pullback_long_requires_volume_not_higher_than_prev_candle() -> None:
     match = evaluate_entry_template(gate=gate, features=features)
 
     assert match is None
+
+
+def test_evaluate_entry_template_uses_previous_confirmed_candle_when_tail_bar_is_open() -> None:
+    gate = HigherTimeframeGate(True, False, True, False, "bullish", "allow_long", "1H bullish")
+    features = pd.DataFrame(
+        [
+            {"close": 100.0, "ema_fast": 99.6, "ema_slow": 99.2, "volume": 1000.0, "rsi": 54.0, "high": 100.2, "low": 99.4, "confirm": "1"},
+            {"close": 99.7, "ema_fast": 99.7, "ema_slow": 99.3, "volume": 880.0, "rsi": 50.0, "high": 99.9, "low": 99.5, "confirm": "1"},
+            {"close": 100.1, "ema_fast": 99.9, "ema_slow": 99.4, "volume": 870.0, "rsi": 56.0, "high": 100.3, "low": 99.8, "confirm": "1"},
+            {"close": 100.8, "ema_fast": 100.8, "ema_slow": 99.4, "volume": 10.0, "rsi": 72.0, "high": 100.9, "low": 100.6, "confirm": "0"},
+        ]
+    )
+
+    match = evaluate_entry_template(gate=gate, features=features)
+
+    assert match is not None
+    assert match.template_name == "pullback_long"
 
 
 def test_pullback_long_proximity_denominator_uses_raw_ema_fast_not_abs() -> None:

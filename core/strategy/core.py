@@ -15,6 +15,7 @@ from core.models import (
     StrategyContext,
     TradeSignal,
 )
+from .candle_selection import select_signal_features
 from .fusion import (
     AnalysisInterpreter,
     AnalysisView,
@@ -25,8 +26,10 @@ from .fusion import (
 from .plugins import build_signal_plugin_manager
 from .positioning import PositionSizer
 from .regime import HigherTimeframeGate, evaluate_higher_timeframe_gate
-from .signals import ObjectiveSignal, ObjectiveSignalGenerator
+from .signals import ObjectiveSignal, ObjectiveSignalGenerator, REVERSAL_ONLY_INDICATOR_NOTES
 from .templates import EntryTemplateMatch, evaluate_entry_template
+
+FAST_PATH_SIZE_RATIO = 0.85
 
 
 @dataclass
@@ -37,6 +40,8 @@ class StrategyOutput:
     fusion_notes: Tuple[str, ...]
     gate_decision: Optional[HigherTimeframeGate] = None
     entry_template: Optional[EntryTemplateMatch] = None
+    entry_tier: str = "none"
+    signal_candle_source: str = "latest_only"
 
 
 class Strategy:
@@ -60,7 +65,8 @@ class Strategy:
         llm_influence_enabled: bool = False,
         market_analysis: Optional[object] = None,
     ) -> StrategyOutput:
-        objective_signals = self.signal_generator.build(features, higher_features)
+        signal_features, signal_candle_source = select_signal_features(features)
+        objective_signals = self.signal_generator.build(signal_features, higher_features)
         parsed_analysis_view = self.analysis_interpreter.parse(analysis_text)
         structured_analysis_view = (
             self.analysis_interpreter.from_market_analysis(market_analysis)
@@ -71,7 +77,11 @@ class Strategy:
             analysis_view = structured_analysis_view
 
         gate_decision = evaluate_higher_timeframe_gate(higher_features)
-        entry_template = evaluate_entry_template(gate=gate_decision, features=features)
+        entry_template = evaluate_entry_template(gate=gate_decision, features=signal_features)
+        seeded_action, seeded_confidence, allow_support_promotion = self._resolve_entry_seed(
+            objective_signals=objective_signals,
+            entry_template=entry_template,
+        )
 
         llm_guard = LLMInfluenceGuard(
             enabled=bool(llm_influence_enabled),
@@ -84,13 +94,13 @@ class Strategy:
             analysis_view,
             llm_guard=llm_guard,
             arbitration_config=self._conflict_arbitration,
-            seeded_action=entry_template.action if entry_template else SignalAction.HOLD,
-            seeded_confidence=entry_template.confidence_floor if entry_template else 0.4,
-            allow_support_promotion=entry_template is not None,
+            seeded_action=seeded_action,
+            seeded_confidence=seeded_confidence,
+            allow_support_promotion=allow_support_promotion,
         )
 
-        latest = features.iloc[-1]
-        liquidity_ok, _liquidity_note = self.signal_generator.liquidity_snapshot(features)
+        latest = signal_features.iloc[-1]
+        liquidity_ok, _liquidity_note = self.signal_generator.liquidity_snapshot(signal_features)
         env_factor, env_note = self.signal_generator.volatility_regime(higher_features)
         notes = list(fusion.notes)
         notes.append(f"[gate] {gate_decision.reason_code}: {gate_decision.note}")
@@ -103,27 +113,38 @@ class Strategy:
             logger.info("event=strategy_conflict_arbiter note={note}", note=arbitration_note)
         action = fusion.action
         confidence = fusion.confidence
-        if entry_template is None:
+        indicator = next((sig for sig in objective_signals if sig.name == "indicator"), None)
+        has_directional_support = any(
+            sig.name != "indicator" and sig.action in {SignalAction.BUY, SignalAction.SELL}
+            for sig in objective_signals
+        )
+        if (
+            entry_template is None
+            and indicator is not None
+            and indicator.note in REVERSAL_ONLY_INDICATOR_NOTES
+            and not has_directional_support
+        ):
             action = SignalAction.HOLD
             confidence = min(confidence, 0.4)
+            notes.append("反转提示仅作确认：未匹配模板或辅助信号，保持 HOLD。")
         if action != SignalAction.HOLD and not liquidity_ok:
             action = SignalAction.HOLD
             confidence = min(confidence, 0.3)
+        entry_tier = "none"
+        if action != SignalAction.HOLD:
+            entry_tier = "template-qualified" if entry_template is not None else "fast-path"
         size = 0.0
-        trend_bias = SignalAction.HOLD
-        if gate_decision.allow_long and not gate_decision.allow_short:
-            trend_bias = SignalAction.BUY
-        elif gate_decision.allow_short and not gate_decision.allow_long:
-            trend_bias = SignalAction.SELL
         if action != SignalAction.HOLD:
             size = self.position_sizer.size(
                 context=context,
                 latest=latest,
                 confidence=confidence,
                 action=action,
-                trend_bias=trend_bias,
+                trend_bias=SignalAction.HOLD,
                 env_factor=env_factor,
             )
+            if entry_tier == "fast-path":
+                size *= FAST_PATH_SIZE_RATIO
         protection: Optional[TradeProtection] = None
         protection_note: Optional[str] = None
         if action != SignalAction.HOLD:
@@ -171,7 +192,26 @@ class Strategy:
             fusion_notes=tuple(notes),
             gate_decision=gate_decision,
             entry_template=entry_template,
+            entry_tier=entry_tier,
+            signal_candle_source=signal_candle_source,
         )
+
+    @staticmethod
+    def _resolve_entry_seed(
+        *,
+        objective_signals: Sequence[ObjectiveSignal],
+        entry_template: Optional[EntryTemplateMatch],
+    ) -> Tuple[SignalAction, float, bool]:
+        if entry_template is not None:
+            return entry_template.action, float(entry_template.confidence_floor or 0.4), True
+        indicator = next((sig for sig in objective_signals if sig.name == "indicator"), None)
+        if (
+            indicator is not None
+            and indicator.action in {SignalAction.BUY, SignalAction.SELL}
+            and indicator.note not in REVERSAL_ONLY_INDICATOR_NOTES
+        ):
+            return indicator.action, float(indicator.confidence or 0.4), True
+        return SignalAction.HOLD, 0.4, True
 
     @staticmethod
     def _build_llm_influence_guard(settings: Optional[object]) -> LLMInfluenceGuard:

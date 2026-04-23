@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from core.models import SignalAction
+from .candle_selection import select_signal_features
 from .plugins import SignalPluginManager
 from .positioning import VOL_TARGET
 
@@ -18,8 +19,8 @@ RSI_OVERBOUGHT = 65
 RSI_STRONG_OVERBOUGHT = 75
 EMA_GAP_THRESHOLD = 0.001
 LIQUIDITY_WINDOW = 20
-MIN_LIQUIDITY_RATIO = 0.2
-MIN_NOTIONAL_USD = 2000.0
+MIN_LIQUIDITY_RATIO = 0.1
+MIN_NOTIONAL_USD = 1000.0
 LOW_VOL_ENV_THRESHOLD = 0.004
 HIGH_VOL_ENV_THRESHOLD = 0.025
 GOLDEN_CROSS_LOOKBACK = 3
@@ -62,14 +63,15 @@ class ObjectiveSignalGenerator:
         features: pd.DataFrame,
         higher_features: Optional[Dict[str, pd.DataFrame]] = None,
     ) -> Tuple[ObjectiveSignal, ...]:
-        indicator_action, indicator_conf, indicator_note = self._indicator_opinion(features)
+        signal_features, _source = select_signal_features(features)
+        indicator_action, indicator_conf, indicator_note = self._indicator_opinion(signal_features)
         signals: List[ObjectiveSignal] = [
             ObjectiveSignal("indicator", indicator_action, indicator_conf, indicator_note)
         ]
         higher_action, higher_conf, higher_note = self._higher_timeframe_bias(higher_features)
         if higher_note:
             signals.append(ObjectiveSignal("higher_timeframe", higher_action, higher_conf, higher_note))
-        signals.extend(self.plugin_manager.generate(self, features, higher_features))
+        signals.extend(self.plugin_manager.generate(self, signal_features, higher_features))
         return tuple(signals)
 
     def volatility_regime(
@@ -97,10 +99,11 @@ class ObjectiveSignalGenerator:
         return 1.0, None
 
     def liquidity_snapshot(self, features: pd.DataFrame) -> Tuple[bool, Optional[str]]:
-        window = min(len(features), LIQUIDITY_WINDOW)
+        signal_features, _source = select_signal_features(features)
+        window = min(len(signal_features), LIQUIDITY_WINDOW)
         if window < 5:
             return True, None
-        recent = features.tail(window)
+        recent = signal_features.tail(window)
         latest = recent.iloc[-1]
         volume = float(latest.get("volume", 0.0) or 0.0)
         avg_volume = float(recent["volume"].mean() or 0.0)

@@ -136,3 +136,31 @@ def test_one_yang_three_yin_signal_buy() -> None:
     assert signal.name == "one_yang_three_yin"
     assert signal.action == SignalAction.BUY
 
+
+def test_liquidity_snapshot_uses_previous_confirmed_candle_when_tail_bar_is_open() -> None:
+    gen = ObjectiveSignalGenerator()
+    df = _base_frame(25)
+    df["confirm"] = "1"
+    df.loc[23, "volume"] = 1500.0
+    df.loc[23, "volume_usd"] = 1500.0 * df.loc[23, "close"]
+    df.loc[24, "confirm"] = "0"
+    df.loc[24, "volume"] = 5.0
+    df.loc[24, "volume_usd"] = 300.0
+
+    ok, note = gen.liquidity_snapshot(df)
+
+    assert ok is True
+    assert note is None
+
+
+def test_liquidity_snapshot_blocks_when_confirmed_candle_is_below_aggressive_floor() -> None:
+    gen = ObjectiveSignalGenerator()
+    df = _base_frame(25)
+    df["confirm"] = "1"
+    df.loc[24, "volume"] = 4.0
+    df.loc[24, "volume_usd"] = 400.0
+
+    ok, note = gen.liquidity_snapshot(df)
+
+    assert ok is False
+    assert "最近一根成交额仅 400 USD" in note

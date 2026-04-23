@@ -29,6 +29,7 @@ from core.models import (
 from core.engine.risk import AccountState, RiskAssessment, RiskManager
 from config.settings import AppSettings
 from core.strategy.core import Strategy, StrategyOutput
+from core.strategy.candle_selection import select_signal_features
 from core.protection import build_protection_settings
 
 
@@ -349,6 +350,8 @@ class TradingEngine:
             "analysis_summary": analysis_bundle.analysis_result.summary,
             "history_hint": analysis_bundle.analysis_result.history_hint,
             "signal": risk_bundle.signal,
+            "entry_tier": getattr(strategy_bundle.strategy_output, "entry_tier", "none"),
+            "signal_candle_source": getattr(strategy_bundle.strategy_output, "signal_candle_source", "latest_only"),
             "execution": {
                 "plan": execution_bundle.plan,
                 "report": execution_bundle.report,
@@ -1234,12 +1237,17 @@ class TradingEngine:
         signal: TradeSignal,
     ) -> None:
         try:
-            latest = features.iloc[-1] if getattr(features, "empty", True) is False else {}
+            signal_features, signal_source = select_signal_features(features)
+            latest = signal_features.iloc[-1] if getattr(signal_features, "empty", True) is False else {}
             ts_value = latest.get("ts", "") if hasattr(latest, "get") else ""
             timestamp = str(ts_value)
             close_price = self._safe_float(latest.get("close", 0.0) if hasattr(latest, "get") else 0.0)
             analysis_view = getattr(strategy_output, "analysis_view", None)
             entry_template = getattr(strategy_output, "entry_template", None)
+            gate_decision = getattr(strategy_output, "gate_decision", None)
+            higher_timeframe_note = str(getattr(gate_decision, "note", "") or "")
+            entry_tier = str(getattr(strategy_output, "entry_tier", "none") or "none")
+            signal_candle_source = str(getattr(strategy_output, "signal_candle_source", signal_source) or signal_source)
             gated_action = (
                 self._action_value(entry_template.action, default="hold")
                 if entry_template is not None and getattr(entry_template, "action", None) is not None
@@ -1256,6 +1264,11 @@ class TradingEngine:
                 analysis_reason=str(getattr(analysis_view, "reason", "") or ""),
                 close_price=close_price,
                 trace_id=trace_id,
+                template_present=entry_template is not None,
+                template_name=str(getattr(entry_template, "template_name", "") or "") or None,
+                higher_timeframe_note=higher_timeframe_note,
+                entry_tier=entry_tier,
+                signal_candle_source=signal_candle_source,
             )
             self.decision_logger.log(record)
         except Exception as exc:  # pragma: no cover

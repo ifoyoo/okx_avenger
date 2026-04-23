@@ -93,6 +93,8 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
     strategy_step_output = StrategyBundle(
         context=StrategyContext(inst_id="BTC-USDT-SWAP", timeframe="5m", max_position=0.01),
         strategy_output=SimpleNamespace(
+            entry_tier="template-qualified",
+            signal_candle_source="latest_confirmed",
             trade_signal=TradeSignal(
                 action=SignalAction.BUY,
                 confidence=0.72,
@@ -244,6 +246,8 @@ def test_run_once_pipeline_order_and_payload(monkeypatch) -> None:
     assert isinstance(result["trace_id"], str)
     assert len(result["trace_id"]) == 16
     assert result["signal"] is risk_signal
+    assert result["entry_tier"] == "template-qualified"
+    assert result["signal_candle_source"] == "latest_confirmed"
     assert result["execution"]["plan"] is execution_step_output.plan
     assert result["order"] == {"ordId": "demo"}
 
@@ -262,6 +266,9 @@ def test_log_decision_records_analysis_gated_and_final_actions(monkeypatch) -> N
         summary="summary",
         strategy_output=SimpleNamespace(
             analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence=0.66, reason="analysis"),
+            gate_decision=SimpleNamespace(note="1H bullish"),
+            entry_tier="template-qualified",
+            signal_candle_source="previous_confirmed",
             entry_template=SimpleNamespace(action=SignalAction.BUY, template_name="pullback_long"),
         ),
         signal=TradeSignal(action=SignalAction.BUY, confidence=0.71, reason="final", size=0.01),
@@ -270,9 +277,17 @@ def test_log_decision_records_analysis_gated_and_final_actions(monkeypatch) -> N
     assert records[0].analysis_action == "buy"
     assert records[0].gated_action == "buy"
     assert records[0].final_strategy_action == "buy"
+    assert records[0].higher_timeframe_note == "1H bullish"
+    assert records[0].entry_tier == "template-qualified"
+    assert records[0].signal_candle_source == "previous_confirmed"
+    assert records[0].template_present is True
+    assert records[0].template_name == "pullback_long"
     payload = records[0].as_dict()
     assert payload["llm_action"] == "buy"
     assert payload["strategy_action"] == "buy"
+    assert payload["entry_tier"] == "template-qualified"
+    assert payload["signal_candle_source"] == "previous_confirmed"
+    assert payload["template_present"] is True
 
 
 def test_log_decision_accepts_string_actions_for_compatibility(monkeypatch) -> None:
@@ -289,6 +304,9 @@ def test_log_decision_accepts_string_actions_for_compatibility(monkeypatch) -> N
         summary="summary",
         strategy_output=SimpleNamespace(
             analysis_view=SimpleNamespace(action="buy", confidence=0.66, reason="analysis"),
+            gate_decision=SimpleNamespace(note="1H bullish"),
+            entry_tier="template-qualified",
+            signal_candle_source="latest_confirmed",
             entry_template=SimpleNamespace(action="buy", template_name="pullback_long"),
         ),
         signal=TradeSignal(action=SignalAction.BUY, confidence=0.71, reason="final", size=0.01),
@@ -296,6 +314,7 @@ def test_log_decision_accepts_string_actions_for_compatibility(monkeypatch) -> N
 
     assert records[0].analysis_action == "buy"
     assert records[0].gated_action == "buy"
+    assert records[0].entry_tier == "template-qualified"
 
 
 def test_log_decision_tolerates_partial_analysis_view(monkeypatch) -> None:
@@ -312,6 +331,9 @@ def test_log_decision_tolerates_partial_analysis_view(monkeypatch) -> None:
         summary="summary",
         strategy_output=SimpleNamespace(
             analysis_view=SimpleNamespace(action=SignalAction.BUY),
+            gate_decision=SimpleNamespace(note="1H mixed"),
+            entry_tier="none",
+            signal_candle_source="latest_confirmed",
             entry_template=None,
         ),
         signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
@@ -320,6 +342,7 @@ def test_log_decision_tolerates_partial_analysis_view(monkeypatch) -> None:
     assert records[0].analysis_action == "buy"
     assert records[0].analysis_confidence == 0.0
     assert records[0].analysis_reason == ""
+    assert records[0].template_present is False
 
 
 def test_log_decision_tolerates_non_numeric_analysis_confidence(monkeypatch) -> None:
@@ -336,6 +359,9 @@ def test_log_decision_tolerates_non_numeric_analysis_confidence(monkeypatch) -> 
         summary="summary",
         strategy_output=SimpleNamespace(
             analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence="N/A", reason="analysis"),
+            gate_decision=SimpleNamespace(note="1H mixed"),
+            entry_tier="none",
+            signal_candle_source="latest_confirmed",
             entry_template=None,
         ),
         signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
@@ -357,6 +383,9 @@ def test_log_decision_tolerates_empty_features(monkeypatch) -> None:
         summary="summary",
         strategy_output=SimpleNamespace(
             analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence=0.66, reason="analysis"),
+            gate_decision=SimpleNamespace(note="1H mixed"),
+            entry_tier="none",
+            signal_candle_source="latest_confirmed",
             entry_template=None,
         ),
         signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),
@@ -380,6 +409,9 @@ def test_log_decision_normalizes_non_finite_values(monkeypatch) -> None:
         summary="summary",
         strategy_output=SimpleNamespace(
             analysis_view=SimpleNamespace(action=SignalAction.BUY, confidence=math.nan, reason="analysis"),
+            gate_decision=SimpleNamespace(note="1H mixed"),
+            entry_tier="none",
+            signal_candle_source="latest_confirmed",
             entry_template=None,
         ),
         signal=TradeSignal(action=SignalAction.HOLD, confidence=0.4, reason="final", size=0.0),

@@ -3,10 +3,10 @@
 > 用途：记录“当前做到哪一步”，供新线程快速恢复。
 
 ## 元信息
-- 最后更新时间：2026-04-16
+- 最后更新时间：2026-04-23
 - 当前主线：按 `docs/NODES.md` 推进
-- 当前批次：四阶段策略/分析质量提升已完成；watchlist 已收口为 manual-only；TP/SL / 通知 / release hardening 已收口；上线前 smoke 期间补上执行对账与重复下单闸门
-- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；watchlist 改为 `watchlist.json` 单一路径；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐；CLI/runtime/通知/backtest 输出已统一为 summary-first 契约；live pending limit 单不会再被误判为失败，且同标的存在未成交委托时会阻断重复下单
+- 当前批次：激进默认策略覆盖已完成；watchlist 继续保持 manual-only；TP/SL / 通知 / release hardening / 执行对账 / runtime 输出契约均已收口
+- 当前节点：`market -> intel -> strategy/fusion -> llm` 四阶段串联完成；默认策略已覆盖为激进版并改为确认 K 线决策；watchlist 改为 `BTC/ETH/SOL/XRP/DOGE/SUI` 默认混合液态池；TP/SL 已在策略/执行/回测打通；通知中心已围绕 runtime 收口；`.env` 未知键、LLM 截断、runtime 部分失败和部署约束已补齐；CLI/runtime/通知/backtest 输出已统一为 summary-first 契约；live pending limit 单不会再被误判为失败，且同标的存在未成交委托时会阻断重复下单
 
 ## 节点进度（简表）
 | 节点 | 状态 | 备注 |
@@ -15,6 +15,7 @@
 | N7 follow-up | 已完成 | `intel` 对所有 provider 引入统一 relevance scoring，headline/snapshot 扩展 relevance metadata，并按 relevance 加权聚合 |
 | N8 follow-up | 已完成 | `LLMBrain` prompt 增加 structured market/intel context，不再只依赖长文本与原始 dict dump |
 | N9 follow-up | 已完成 | `Strategy/Fusion` 已能直接消费 `MarketAnalysis v2`，确定性分析不再只通过自由文本进入融合 |
+| Aggressive default overwrite | 已完成 | 默认策略、watchlist、确认 K 线选择、模板/fast-path 行为、runtime entry 元数据全部覆盖为激进版 |
 | N2 | 已完成 | `cli.py` 已瘦身为 facade；参数解析、命令分发、workflow/reporting/storage 已拆入 `cli_app/`，`okx -> cli.py` 仍是唯一入口 |
 | N12 | 已完成 | `TradingEngine.run_once` 已拆为 data/analysis/strategy/risk/execution 五步，并新增测试覆盖 |
 | N15 | 已完成 | 已引入 `trace_id` 并在主链路输出结构化日志字段（action/blocked/error_code） |
@@ -29,6 +30,35 @@
 状态约定：`未开始` / `进行中` / `已完成` / `阻塞`
 
 ## 最近完成项（最新一条放最上）
+- 时间：2026-04-23
+- 节点：默认策略覆盖 - aggressive overwrite
+- 目标：把默认实盘策略从保守版直接覆盖成激进版，解决“长时间不交易”的默认门禁过严问题。
+- 结果：完成。`BALANCE_USAGE_RATIO=0.9`、`DEFAULT_LEVERAGE=8`、`RISK_DAILY_LOSS_LIMIT_PCT=0.08`、`RISK_CONSECUTIVE_LOSS_LIMIT=6`、`RISK_CONSECUTIVE_COOLDOWN_MINUTES=90`、`EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=2.2` 已成为默认；`watchlist.json` 默认池已切到 `BTC/ETH/SOL/XRP/DOGE/SUI`；信号/模板/流动性统一只看最新确认 K 线；`1H` 只做上下文；runtime 日志与决策日志新增 `entry_tier` / `signal_candle_source`。
+- 变更文件：
+  - `config/settings.py`
+  - `.env`
+  - `watchlist.json`
+  - `core/strategy/candle_selection.py`
+  - `core/strategy/signals.py`
+  - `core/strategy/templates.py`
+  - `core/strategy/core.py`
+  - `core/analysis/logger.py`
+  - `core/engine/trading.py`
+  - `cli_app/runtime_execution.py`
+  - `tests/test_settings_validation.py`
+  - `tests/test_watchlist_loader.py`
+  - `tests/test_strategy_objective_signals.py`
+  - `tests/test_strategy_templates.py`
+  - `tests/test_strategy_core.py`
+  - `tests/test_trading_pipeline.py`
+  - `tests/test_cli_runtime_cycle.py`
+  - `README.md`
+  - `docs/DECISIONS.md`
+  - `docs/SESSION_STATE.md`
+  - `docs/NEXT_STEP.md`
+- 验证命令与结果：
+  - `.venv/bin/python -m pytest -q tests/test_settings_validation.py tests/test_watchlist_loader.py tests/test_strategy_objective_signals.py tests/test_strategy_templates.py tests/test_strategy_core.py tests/test_trading_pipeline.py tests/test_cli_runtime_cycle.py` -> `78 passed`
+
 - 时间：2026-04-16
 - 节点：通知收口 - Telegram critical-only alerts
 - 目标：把 Telegram 从运行结果播报收口成真正的告警通道，只保留需要人工处理的消息。

@@ -15,6 +15,7 @@
 - Telegram 通知
 - 支持 Gemini LLM 辅助判断
 - 默认先用 `--dry-run`
+- 默认策略已经覆盖为激进版，不再保留保守默认
 
 ## What It Is
 
@@ -76,18 +77,18 @@ OKX_API_SECRET=xxx
 OKX_PASSPHRASE=xxx
 OKX_TD_MODE=isolated
 
-BALANCE_USAGE_RATIO=0.6
+BALANCE_USAGE_RATIO=0.9
 DEFAULT_MAX_POSITION=0.02
 FEATURE_LIMIT=180
-DEFAULT_LEVERAGE=5
+DEFAULT_LEVERAGE=8
 DEFAULT_TAKE_PROFIT_UPL_RATIO=0.20
 DEFAULT_STOP_LOSS_UPL_RATIO=0.10
-RISK_DAILY_LOSS_LIMIT_PCT=0.02
-RISK_CONSECUTIVE_LOSS_LIMIT=3
-RISK_CONSECUTIVE_COOLDOWN_MINUTES=360
+RISK_DAILY_LOSS_LIMIT_PCT=0.08
+RISK_CONSECUTIVE_LOSS_LIMIT=6
+RISK_CONSECUTIVE_COOLDOWN_MINUTES=90
 EXECUTION_PENDING_ORDER_TTL_MINUTES=45
 EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN=true
-EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=1.35
+EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=2.2
 
 NOTIFY_ENABLED=true
 TELEGRAM_BOT_TOKEN=
@@ -109,17 +110,37 @@ LLM_MAX_TOKENS=4096
 - 运行时会按当前杠杆换算成交易所触发价
 - Telegram 现在只推送异常、阻断、下单失败，不再播报成功下单
 - 同标的 live 未成交挂单超过 `EXECUTION_PENDING_ORDER_TTL_MINUTES=45` 后会先撤单，但本轮仍阻塞，下一轮再重新评估
-- 开启 `EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN=true` 后，允许同方向加仓；`EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=3.0` 表示同向总仓位最多放大到 `max_position` 的 3 倍
+- 开启 `EXECUTION_ALLOW_SAME_DIRECTION_SCALE_IN=true` 后，允许同方向加仓；`EXECUTION_SAME_DIRECTION_SCALE_IN_MULTIPLIER=2.2` 表示同向总仓位最多放大到 `max_position` 的 2.2 倍
 
 ## Watchlist
 
-`watchlist.json` 现在默认就是最小实战形态：
+`watchlist.json` 现在默认就是激进但仍然干净的液态池：
 
 ```json
 [
   {
     "inst_id": "BTC-USDT-SWAP",
-    "max_position": 0.03
+    "max_position": 0.01
+  },
+  {
+    "inst_id": "ETH-USDT-SWAP",
+    "max_position": 0.15
+  },
+  {
+    "inst_id": "SOL-USDT-SWAP",
+    "max_position": 1.0
+  },
+  {
+    "inst_id": "XRP-USDT-SWAP",
+    "max_position": 60.0
+  },
+  {
+    "inst_id": "DOGE-USDT-SWAP",
+    "max_position": 600.0
+  },
+  {
+    "inst_id": "SUI-USDT-SWAP",
+    "max_position": 40.0
   }
 ]
 ```
@@ -180,6 +201,7 @@ cd /root/apps/okx_avenger
 - 资金太小，系统会因为最小下单量直接拦截。
 - 杠杆要和 OKX 账户真实设置一致。
 - 默认 TP/SL 看的不是价格百分比，而是 OKX `uplRatio`。
+- 5m 信号现在优先看最新确认 K 线，`1H` 只作上下文说明，不再直接 veto。
 - LLM 只该辅助，不该替你发疯。
 - Watchlist 少一点，归因才清楚。
 

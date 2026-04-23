@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from core.data.watchlist_loader import WatchlistManager, normalize_entry
+from core.data.watchlist_loader import WatchlistManager, load_watchlist, normalize_entry
 
 
 def test_normalize_entry_preserves_news_overrides() -> None:
@@ -50,4 +50,17 @@ def test_watchlist_manager_is_manual_only_and_does_not_require_mode_settings(tmp
             "timeframe": "5m",
             "higher_timeframes": ("1H",),
         }
+    ]
+
+
+def test_checked_in_watchlist_defaults_to_mixed_liquid_pool() -> None:
+    entries = load_watchlist()
+
+    assert [item["inst_id"] for item in entries] == [
+        "BTC-USDT-SWAP",
+        "ETH-USDT-SWAP",
+        "SOL-USDT-SWAP",
+        "XRP-USDT-SWAP",
+        "DOGE-USDT-SWAP",
+        "SUI-USDT-SWAP",
     ]

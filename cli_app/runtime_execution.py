@@ -227,6 +227,7 @@ def _format_runtime_result_line(
     timeframe: str,
     dry_run: bool,
     signal: TradeSignal,
+    entry_tier: str,
     plan: Optional[ExecutionPlan],
     execution_report: Optional[object],
     order: Optional[dict],
@@ -246,6 +247,7 @@ def _format_runtime_result_line(
         f"action={signal.action.value.upper()}",
         f"conf={signal.confidence:.2f}",
         f"result={status}",
+        f"entry={entry_tier}",
         _runtime_result_note(
             status=status,
             plan=plan,
@@ -359,6 +361,7 @@ def run_runtime_cycle(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
                 timeframe=timeframe,
                 dry_run=bool(args.dry_run),
                 signal=signal,
+                entry_tier=str(result.get("entry_tier", "none") or "none"),
                 plan=plan,
                 execution_report=report,
                 order=result.get("order"),
