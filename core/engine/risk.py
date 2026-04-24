@@ -92,7 +92,7 @@ class RiskManager:
 
     def __init__(
         self,
-        min_available_ratio: float = 0.2,
+        min_available_ratio: float = 0.03,
         max_confidence_when_blocked: float = 0.35,
         daily_loss_limit: float = 0.0,
         daily_loss_limit_pct: float = 0.0,

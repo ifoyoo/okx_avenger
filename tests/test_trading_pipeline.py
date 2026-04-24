@@ -726,6 +726,217 @@ def test_execution_step_passes_runtime_leverage_to_execution_engine(monkeypatch)
     assert captured["leverage"] == 7.0
 
 
+def test_trading_engine_wires_configured_min_available_ratio_into_risk_manager() -> None:
+    settings = SimpleNamespace(
+        account=SimpleNamespace(okx_td_mode=None, okx_force_pos_side=None),
+        strategy=SimpleNamespace(
+            balance_usage_ratio=0.5,
+            default_leverage=1.0,
+            default_take_profit_upl_ratio=0.0,
+            default_stop_loss_upl_ratio=0.0,
+            risk_min_available_ratio=0.03,
+        ),
+        runtime=SimpleNamespace(data_staleness_seconds=180),
+        intel=SimpleNamespace(
+            event_gate_mode="degrade",
+            event_gate_degrade_threshold=0.72,
+            event_gate_block_threshold=0.9,
+            event_gate_degrade_confidence_cap=0.45,
+            event_gate_degrade_size_ratio=0.5,
+        ),
+    )
+
+    engine = TradingEngine(
+        okx_client=SimpleNamespace(),
+        analyzer=SimpleNamespace(),
+        strategy=SimpleNamespace(),
+        settings=settings,
+    )
+
+    assert abs(engine.risk_manager.min_available_ratio - 0.03) < 1e-12
+
+
+def test_execution_step_syncs_exchange_leverage_before_live_execution(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.account_settings.okx_td_mode = "isolated"
+    engine.leverage = 7.0
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="isolated",
+        pos_side=None,
+        order_type="market",
+        size=0.01,
+        price=None,
+        est_slippage=0.0,
+    )
+    leverage_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        engine.okx,
+        "set_leverage",
+        lambda **kwargs: leverage_calls.append(kwargs) or {"code": "0", "data": [{}]},
+        raising=False,
+    )
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(engine.execution_engine, "has_live_pending_order", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(engine.execution_engine, "list_live_pending_orders", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(engine.execution_engine, "same_direction_position_size", lambda *_args, **_kwargs: 0.0)
+    executed = {"called": False}
+
+    def _execute(_plan):
+        executed["called"] = True
+        return SimpleNamespace(success=True, response={"ordId": "1"}, code=None, error=None)
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+    )
+
+    assert bundle.plan is built_plan
+    assert leverage_calls == [
+        {
+            "inst_id": "BTC-USDT-SWAP",
+            "leverage": 7.0,
+            "td_mode": "isolated",
+            "pos_side": None,
+        }
+    ]
+    assert executed["called"] is True
+
+
+def test_execution_step_blocks_when_exchange_leverage_sync_fails(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.account_settings.okx_td_mode = "isolated"
+    engine.leverage = 7.0
+    fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)
+    features = pd.DataFrame([{"ts": fresh_ts, "close": 100.0, "atr": 1.0}])
+    signal = TradeSignal(action=SignalAction.BUY, confidence=0.7, reason="x", size=0.01)
+
+    built_plan = ExecutionPlan(
+        inst_id="BTC-USDT-SWAP",
+        action=SignalAction.BUY,
+        td_mode="isolated",
+        pos_side=None,
+        order_type="market",
+        size=0.01,
+        price=None,
+        est_slippage=0.0,
+    )
+
+    monkeypatch.setattr(
+        engine.okx,
+        "set_leverage",
+        lambda **_kwargs: {"error": {"code": "51603", "message": "set leverage failed"}},
+        raising=False,
+    )
+    monkeypatch.setattr(engine.execution_engine, "build_plan", lambda **kwargs: built_plan)
+    monkeypatch.setattr(engine.execution_engine, "has_live_pending_order", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(engine.execution_engine, "list_live_pending_orders", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(engine.execution_engine, "same_direction_position_size", lambda *_args, **_kwargs: 0.0)
+
+    def _should_not_execute(_plan):
+        raise AssertionError("execution should be blocked when leverage sync fails")
+
+    monkeypatch.setattr(engine.execution_engine, "execute", _should_not_execute)
+
+    bundle = engine._run_execution_step(
+        inst_id="BTC-USDT-SWAP",
+        timeframe="5m",
+        trace_id="trace1234567890a",
+        dry_run=False,
+        signal=signal,
+        features=features,
+    )
+
+    assert bundle.plan.blocked is True
+    assert "杠杆同步失败" in (bundle.plan.block_reason or "")
+    assert bundle.report is None
+
+
+def test_sync_active_position_leverage_updates_only_mismatched_positions(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.leverage = 8.0
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        engine.okx,
+        "get_positions",
+        lambda inst_type="SWAP": {
+            "data": [
+                {"instId": "BTC-USDT-SWAP", "pos": "0.01", "lever": "3", "mgnMode": "isolated", "posSide": "net"},
+                {"instId": "ETH-USDT-SWAP", "pos": "0", "lever": "3", "mgnMode": "isolated", "posSide": "net"},
+                {"instId": "SOL-USDT-SWAP", "pos": "0.02", "lever": "8", "mgnMode": "isolated", "posSide": "net"},
+                {"instId": "XRP-USDT-SWAP", "pos": "-1", "lever": "5", "mgnMode": "isolated", "posSide": "short"},
+            ]
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        engine.okx,
+        "set_leverage",
+        lambda **kwargs: calls.append(kwargs) or {"code": "0", "data": [{}]},
+        raising=False,
+    )
+
+    engine.sync_active_position_leverage()
+
+    assert calls == [
+        {
+            "inst_id": "BTC-USDT-SWAP",
+            "leverage": 8.0,
+            "td_mode": "isolated",
+            "pos_side": None,
+        },
+        {
+            "inst_id": "XRP-USDT-SWAP",
+            "leverage": 8.0,
+            "td_mode": "isolated",
+            "pos_side": "short",
+        },
+    ]
+
+
+def test_sync_active_position_leverage_continues_after_single_position_failure(monkeypatch) -> None:
+    engine = _build_engine()
+    engine.leverage = 8.0
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        engine.okx,
+        "get_positions",
+        lambda inst_type="SWAP": {
+            "data": [
+                {"instId": "BTC-USDT-SWAP", "pos": "0.01", "lever": "3", "mgnMode": "isolated", "posSide": "net"},
+                {"instId": "DOGE-USDT-SWAP", "pos": "1", "lever": "3", "mgnMode": "isolated", "posSide": "net"},
+            ]
+        },
+        raising=False,
+    )
+
+    def _set_leverage(**kwargs):
+        calls.append(str(kwargs["inst_id"]))
+        if kwargs["inst_id"] == "BTC-USDT-SWAP":
+            return {"error": {"code": "51603", "message": "set leverage failed"}}
+        return {"code": "0", "data": [{}]}
+
+    monkeypatch.setattr(engine.okx, "set_leverage", _set_leverage, raising=False)
+
+    engine.sync_active_position_leverage()
+
+    assert calls == ["BTC-USDT-SWAP", "DOGE-USDT-SWAP"]
+
+
 def test_execution_step_allows_fresh_data(monkeypatch) -> None:
     engine = _build_engine()
     fresh_ts = pd.Timestamp.now(tz="UTC") - pd.Timedelta(seconds=30)

@@ -32,6 +32,18 @@ def _notify_runtime_failure(bundle: RuntimeBundle, *, detail: str) -> None:
     notifier.publish(NotificationEvent(kind="runtime_error", detail=detail))
 
 
+def _sync_runtime_leverage(bundle: RuntimeBundle, *, dry_run: bool) -> None:
+    if dry_run:
+        return
+    engine = getattr(bundle, "engine", None)
+    if engine is None or not hasattr(engine, "sync_active_position_leverage"):
+        return
+    try:
+        engine.sync_active_position_leverage()
+    except Exception as exc:  # pragma: no cover
+        logger.warning("运行时杠杆同步失败 err={}", exc)
+
+
 def sync_protection_orders(bundle: RuntimeBundle) -> int:
     monitor = getattr(bundle, "protection_monitor", None)
     if monitor is None:
@@ -62,6 +74,7 @@ def run_runtime_once(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
         if lifecycle_manager is not None and not bool(getattr(args, "dry_run", False)):
             lifecycle_manager.start()
         _write_runtime_heartbeat(path=heartbeat_path, status="running", cycle=1)
+        _sync_runtime_leverage(bundle, dry_run=bool(getattr(args, "dry_run", False)))
         log_strategy_snapshot(bundle)
         exit_code = run_runtime_cycle(bundle, args)
         _write_runtime_heartbeat(path=heartbeat_path, status="idle", cycle=1, exit_code=exit_code)
@@ -95,6 +108,7 @@ def run_runtime_loop(bundle: RuntimeBundle, args: argparse.Namespace) -> int:
             started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             logger.info("===== 新一轮扫描开始 {} =====", started)
             _write_runtime_heartbeat(path=heartbeat_path, status="running", cycle=cycle)
+            _sync_runtime_leverage(bundle, dry_run=bool(getattr(args, "dry_run", False)))
             exit_code = run_runtime_cycle(bundle, args)
             state = "idle" if exit_code == 0 else "error"
             _write_runtime_heartbeat(path=heartbeat_path, status=state, cycle=cycle, exit_code=exit_code)

@@ -44,6 +44,14 @@ def test_strategy_settings_expose_upl_ratio_defaults() -> None:
     assert settings.default_stop_loss_upl_ratio == 0.18
 
 
+def test_strategy_settings_expose_min_available_ratio_default_and_override() -> None:
+    assert StrategySettings.model_fields["risk_min_available_ratio"].default == 0.03
+
+    settings = StrategySettings(RISK_MIN_AVAILABLE_RATIO=0.12)
+
+    assert settings.risk_min_available_ratio == 0.12
+
+
 def test_intel_settings_reject_invalid_threshold_order() -> None:
     with pytest.raises(ValidationError):
         IntelSettings(
@@ -97,6 +105,7 @@ def test_settings_defaults_match_redesign(monkeypatch) -> None:
     assert settings.execution_same_direction_scale_in_multiplier == 1.35
     assert strategy.risk_daily_loss_limit_pct == 0.02
     assert strategy.risk_consecutive_loss_limit == 3
+    assert strategy.risk_min_available_ratio == 0.03
 
 
 def test_notification_settings_normalize_level() -> None:
@@ -124,6 +133,7 @@ def test_build_and_dump_config_snapshot(tmp_path) -> None:
     assert snapshot["account"]["okx_api_key_set"] is True
     assert "watchlist_mode" not in snapshot["runtime"]
     assert "auto_watchlist_size" not in snapshot["runtime"]
+    assert snapshot["strategy"]["risk_min_available_ratio"] == 0.03
 
     path = dump_config_snapshot(settings, runtime.config_snapshot_path)
     assert path.exists()

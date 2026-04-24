@@ -304,6 +304,27 @@ class OKXClient:
 
         return self._request("account_config", self._account.get_config)
 
+    def set_leverage(
+        self,
+        *,
+        inst_id: str,
+        leverage: float,
+        td_mode: str,
+        pos_side: Optional[str] = None,
+        ccy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """同步交易所杠杆设置."""
+
+        return self._request(
+            "set_leverage",
+            self._account.set_leverage,
+            lever=str(leverage),
+            mgnMode=td_mode or "",
+            instId=inst_id or "",
+            ccy=ccy or "",
+            posSide=pos_side or "",
+        )
+
     def get_positions(self, inst_type: str = "SWAP") -> Dict[str, Any]:
         return self._request("positions", self._account.get_positions, instType=inst_type)
 

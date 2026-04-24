@@ -30,6 +30,7 @@ def test_run_runtime_once_writes_running_and_idle_heartbeat(monkeypatch) -> None
     bundle = SimpleNamespace(
         notifier=SimpleNamespace(publish=lambda event: writes.append({"event": event})),
         protection_monitor=monitor,
+        engine=SimpleNamespace(sync_active_position_leverage=lambda: writes.append({"sync": "live"})),
         settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json")),
     )
 
@@ -42,18 +43,40 @@ def test_run_runtime_once_writes_running_and_idle_heartbeat(monkeypatch) -> None
     assert result == 7
     assert writes[0]["status"] == "running"
     assert writes[0]["cycle"] == 1
-    assert writes[1] == {"snapshot": bundle}
-    assert writes[2]["status"] == "idle"
-    assert writes[2]["exit_code"] == 7
-    assert writes[2]["cycle"] == 1
+    assert writes[1] == {"sync": "live"}
+    assert writes[2] == {"snapshot": bundle}
+    assert writes[3]["status"] == "idle"
+    assert writes[3]["exit_code"] == 7
+    assert writes[3]["cycle"] == 1
     assert monitor.started == 1
     assert monitor.stopped == 1
+
+
+def test_run_runtime_once_skips_leverage_sync_in_dry_run(monkeypatch) -> None:
+    workflows = _load_workflows()
+    writes = []
+    engine = SimpleNamespace(sync_active_position_leverage=lambda: writes.append("sync"))
+    bundle = SimpleNamespace(
+        notifier=SimpleNamespace(publish=lambda event: writes.append({"event": event})),
+        engine=engine,
+        settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json")),
+    )
+
+    monkeypatch.setattr(workflows, "_write_runtime_heartbeat", lambda **kwargs: writes.append(kwargs))
+    monkeypatch.setattr(workflows, "log_strategy_snapshot", lambda current: writes.append({"snapshot": current}))
+    monkeypatch.setattr(workflows, "run_runtime_cycle", lambda current, args: 0)
+
+    result = workflows.run_runtime_once(bundle, argparse.Namespace(dry_run=True))
+
+    assert result == 0
+    assert "sync" not in writes
 
 
 def test_run_runtime_once_notifies_runtime_error(monkeypatch) -> None:
     workflows = _load_workflows()
     bundle = SimpleNamespace(
         notifier=SimpleNamespace(events=[], publish=lambda event: bundle.notifier.events.append(event)),
+        engine=SimpleNamespace(sync_active_position_leverage=lambda: None),
         settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json")),
     )
 
@@ -70,6 +93,25 @@ def test_run_runtime_once_notifies_runtime_error(monkeypatch) -> None:
 
     assert len(bundle.notifier.events) == 1
     assert bundle.notifier.events[0].kind == "runtime_error"
+
+
+def test_run_runtime_loop_syncs_leverage_each_live_cycle(monkeypatch) -> None:
+    workflows = _load_workflows()
+    calls = []
+    bundle = SimpleNamespace(
+        engine=SimpleNamespace(sync_active_position_leverage=lambda: calls.append("sync")),
+        settings=SimpleNamespace(runtime=SimpleNamespace(runtime_heartbeat_path="data/runtime-heartbeat.json", run_interval_minutes=5)),
+    )
+
+    monkeypatch.setattr(workflows, "_write_runtime_heartbeat", lambda **kwargs: calls.append(kwargs["status"]))
+    monkeypatch.setattr(workflows, "log_strategy_snapshot", lambda current: calls.append("snapshot"))
+    monkeypatch.setattr(workflows, "run_runtime_cycle", lambda current, args: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(workflows, "time", SimpleNamespace(sleep=lambda seconds: None))
+
+    result = workflows.run_runtime_loop(bundle, argparse.Namespace(dry_run=False, interval_minutes=0))
+
+    assert result == 0
+    assert calls[:3] == ["snapshot", "running", "sync"]
 
 
 def test_sync_protection_orders_configures_watchlist_thresholds_and_enforces(monkeypatch) -> None:

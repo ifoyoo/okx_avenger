@@ -114,6 +114,12 @@ class TradingEngine:
             )
         except (TypeError, ValueError):
             consecutive_cooldown_minutes = 180
+        try:
+            risk_min_available_ratio = float(
+                getattr(self.strategy_settings, "risk_min_available_ratio", 0.03) or 0.03
+            )
+        except (TypeError, ValueError):
+            risk_min_available_ratio = 0.03
         risk_state_path = str(
             getattr(self.strategy_settings, "risk_state_path", "data/risk_circuit_state.json")
             or "data/risk_circuit_state.json"
@@ -143,6 +149,7 @@ class TradingEngine:
         self.feature_indicator_overrides = feature_indicator_overrides
         self._pos_mode: Optional[str] = None
         self.risk_manager = RiskManager(
+            min_available_ratio=max(0.0, min(1.0, risk_min_available_ratio)),
             daily_loss_limit=daily_loss_limit,
             daily_loss_limit_pct=daily_loss_limit_pct,
             consecutive_loss_limit=consecutive_loss_limit,
@@ -577,6 +584,18 @@ class TradingEngine:
         execution_report: Optional[ExecutionReport] = None
         order_result: Optional[Dict[str, Any]] = None
         if not dry_run and not execution_plan.blocked:
+            leverage_sync_reason = self._sync_exchange_leverage(
+                inst_id=inst_id,
+                td_mode=execution_plan.td_mode or td_mode,
+                pos_side=execution_plan.pos_side,
+            )
+            if leverage_sync_reason:
+                execution_plan.blocked = True
+                execution_plan.block_reason = leverage_sync_reason
+                execution_plan.protection = None
+                execution_plan.notes = tuple(execution_plan.notes) + (leverage_sync_reason,)
+                exec_logger.warning("event=leverage_sync_blocked reason={reason}", reason=leverage_sync_reason)
+        if not dry_run and not execution_plan.blocked:
             execution_report = self.execution_engine.execute(execution_plan)
             if execution_report.success and execution_report.response and not execution_report.response.get("error"):
                 order_result = execution_report.response
@@ -603,6 +622,131 @@ class TradingEngine:
             dry_run=dry_run,
         )
         return execution_bundle
+
+    def _sync_exchange_leverage(
+        self,
+        *,
+        inst_id: str,
+        td_mode: str,
+        pos_side: Optional[str],
+    ) -> Optional[str]:
+        mode = str(td_mode or "").strip().lower()
+        if mode not in {"cross", "isolated"}:
+            return None
+        if not hasattr(self.okx, "set_leverage"):
+            return None
+        try:
+            response = self.okx.set_leverage(
+                inst_id=inst_id,
+                leverage=self.leverage,
+                td_mode=mode,
+                pos_side=pos_side,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning(
+                "event=leverage_sync_failed inst_id={} leverage={} td_mode={} pos_side={} err={}",
+                inst_id,
+                self.leverage,
+                mode,
+                pos_side,
+                exc,
+            )
+            return f"杠杆同步失败：{exc}"
+        error = response.get("error") if isinstance(response, dict) else None
+        if isinstance(error, dict):
+            code = str(error.get("code") or "")
+            message = str(error.get("message") or "unknown error")
+            logger.warning(
+                "event=leverage_sync_failed inst_id={} leverage={} td_mode={} pos_side={} code={} msg={}",
+                inst_id,
+                self.leverage,
+                mode,
+                pos_side,
+                code,
+                message,
+            )
+            return f"杠杆同步失败：{message}"
+        return None
+
+    def sync_active_position_leverage(self) -> None:
+        if not hasattr(self.okx, "get_positions") or not hasattr(self.okx, "set_leverage"):
+            return
+        try:
+            payload = self.okx.get_positions(inst_type="SWAP")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("event=active_position_leverage_scan_failed err={}", exc)
+            return
+        entries = payload.get("data") if isinstance(payload, dict) else []
+        if not isinstance(entries, list):
+            return
+        updated = 0
+        failed = 0
+        skipped = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            inst_id = str(entry.get("instId") or "").strip()
+            if not inst_id:
+                continue
+            try:
+                size = abs(float(entry.get("pos") or 0.0))
+            except (TypeError, ValueError):
+                size = 0.0
+            if size <= 0:
+                continue
+            try:
+                current_leverage = float(entry.get("lever") or 0.0)
+            except (TypeError, ValueError):
+                current_leverage = 0.0
+            if current_leverage > 0 and abs(current_leverage - self.leverage) <= 1e-9:
+                skipped += 1
+                continue
+            td_mode = str(entry.get("mgnMode") or self._determine_td_mode(inst_id) or "").strip().lower()
+            if td_mode not in {"cross", "isolated"}:
+                skipped += 1
+                continue
+            raw_pos_side = str(entry.get("posSide") or "").strip().lower()
+            pos_side = None if raw_pos_side in {"", "net"} else raw_pos_side
+            try:
+                response = self.okx.set_leverage(
+                    inst_id=inst_id,
+                    leverage=self.leverage,
+                    td_mode=td_mode,
+                    pos_side=pos_side,
+                )
+            except Exception as exc:  # pragma: no cover
+                failed += 1
+                logger.warning(
+                    "event=active_position_leverage_sync_failed inst_id={} leverage={} td_mode={} pos_side={} err={}",
+                    inst_id,
+                    self.leverage,
+                    td_mode,
+                    pos_side,
+                    exc,
+                )
+                continue
+            error = response.get("error") if isinstance(response, dict) else None
+            if isinstance(error, dict):
+                failed += 1
+                logger.warning(
+                    "event=active_position_leverage_sync_failed inst_id={} leverage={} td_mode={} pos_side={} code={} msg={}",
+                    inst_id,
+                    self.leverage,
+                    td_mode,
+                    pos_side,
+                    str(error.get("code") or ""),
+                    str(error.get("message") or "unknown error"),
+                )
+                continue
+            updated += 1
+        if updated or failed:
+            logger.info(
+                "event=active_position_leverage_sync updated={} skipped={} failed={} target_leverage={}",
+                updated,
+                skipped,
+                failed,
+                self.leverage,
+            )
 
     def _apply_same_direction_position_rule(
         self,

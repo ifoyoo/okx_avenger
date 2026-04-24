@@ -54,6 +54,7 @@ class StrategySettings(SettingsBase):
     default_leverage: float = Field(5.0, alias="DEFAULT_LEVERAGE")
     default_take_profit_upl_ratio: float = Field(0.2, alias="DEFAULT_TAKE_PROFIT_UPL_RATIO")
     default_stop_loss_upl_ratio: float = Field(0.1, alias="DEFAULT_STOP_LOSS_UPL_RATIO")
+    risk_min_available_ratio: float = Field(0.03, alias="RISK_MIN_AVAILABLE_RATIO")
     risk_daily_loss_limit: float = Field(0.0, alias="RISK_DAILY_LOSS_LIMIT")
     risk_daily_loss_limit_pct: float = Field(0.02, alias="RISK_DAILY_LOSS_LIMIT_PCT")
     risk_consecutive_loss_limit: int = Field(3, alias="RISK_CONSECUTIVE_LOSS_LIMIT")
@@ -72,6 +73,7 @@ class StrategySettings(SettingsBase):
         "balance_usage_ratio",
         "default_take_profit_upl_ratio",
         "default_stop_loss_upl_ratio",
+        "risk_min_available_ratio",
         "risk_daily_loss_limit_pct",
         "strategy_arb_strong_conflict_ratio",
         "strategy_arb_hold_confidence_cap",
@@ -320,6 +322,7 @@ def build_config_snapshot(settings: AppSettings) -> Dict[str, Any]:
         "strategy": {
             "balance_usage_ratio": settings.strategy.balance_usage_ratio,
             "default_leverage": settings.strategy.default_leverage,
+            "risk_min_available_ratio": settings.strategy.risk_min_available_ratio,
             "risk_daily_loss_limit": settings.strategy.risk_daily_loss_limit,
             "risk_daily_loss_limit_pct": settings.strategy.risk_daily_loss_limit_pct,
             "risk_consecutive_loss_limit": settings.strategy.risk_consecutive_loss_limit,
